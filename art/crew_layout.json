@@ -1,0 +1,255 @@
+{
+ "note": "x, y in artkit units (160 a tile) in the weapon's own frame: +x the way it faces, +y its left; heading in degrees relative to the weapon",
+ "weapons": {
+  "us_anti_tank_gun": {
+   "crew": [
+    {
+     "unit": "us_at_gunner",
+     "x": -14.5,
+     "y": 32.0,
+     "heading": 0
+    },
+    {
+     "unit": "us_at_loader",
+     "x": -39.5,
+     "y": -34.0,
+     "heading": 45
+    },
+    {
+     "unit": "us_at_commander",
+     "x": -84.5,
+     "y": 55.0,
+     "heading": 0
+    }
+   ],
+   "moving": {
+    "weapon": "us_anti_tank_gun_limbered",
+    "crew": [
+     {
+      "unit": "us_pusher",
+      "x": -139.6,
+      "y": 15.0,
+      "heading": 0
+     },
+     {
+      "unit": "us_pusher",
+      "x": -139.6,
+      "y": -15.0,
+      "heading": 0
+     }
+    ]
+   }
+  },
+  "us_mortar": {
+   "crew": [
+    {
+     "unit": "us_mortar_gunner",
+     "x": -26.7,
+     "y": 26.0,
+     "heading": 0
+    },
+    {
+     "unit": "us_loader_bomb",
+     "x": -2.7,
+     "y": -34.0,
+     "heading": 90
+    }
+   ],
+   "moving": {
+    "weapon": null,
+    "crew": [
+     {
+      "unit": "us_tube_carrier"
+     },
+     {
+      "unit": "us_baseplate_carrier"
+     }
+    ]
+   }
+  },
+  "us_tripod_mg": {
+   "crew": [
+    {
+     "unit": "us_mg_gunner",
+     "x": -52.1,
+     "y": 0.0,
+     "heading": 0
+    },
+    {
+     "unit": "us_loader_box",
+     "x": -19.6,
+     "y": 34.0,
+     "heading": 0
+    }
+   ],
+   "moving": {
+    "weapon": null,
+    "crew": [
+     {
+      "unit": "us_mg_carrier"
+     },
+     {
+      "unit": "us_tripod_carrier"
+     }
+    ]
+   }
+  },
+  "us_howitzer": {
+   "crew": [
+    {
+     "unit": "us_at_gunner",
+     "x": 13.1,
+     "y": 32.0,
+     "heading": 0
+    },
+    {
+     "unit": "us_at_loader",
+     "x": -11.9,
+     "y": -34.0,
+     "heading": 45
+    },
+    {
+     "unit": "us_at_commander",
+     "x": -56.9,
+     "y": 55.0,
+     "heading": 0
+    }
+   ]
+  },
+  "us_rocket_gunner": {
+   "crew": [
+    {
+     "unit": "us_loader_rocket",
+     "x": -34,
+     "y": -34,
+     "heading": 0
+    }
+   ]
+  },
+  "de_anti_tank_gun": {
+   "crew": [
+    {
+     "unit": "de_at_gunner",
+     "x": -20.6,
+     "y": 32.0,
+     "heading": 0
+    },
+    {
+     "unit": "de_at_loader",
+     "x": -45.6,
+     "y": -34.0,
+     "heading": 45
+    },
+    {
+     "unit": "de_at_commander",
+     "x": -90.6,
+     "y": 55.0,
+     "heading": 0
+    }
+   ],
+   "moving": {
+    "weapon": "de_anti_tank_gun_limbered",
+    "crew": [
+     {
+      "unit": "de_pusher",
+      "x": -145.6,
+      "y": 15.0,
+      "heading": 0
+     },
+     {
+      "unit": "de_pusher",
+      "x": -145.6,
+      "y": -15.0,
+      "heading": 0
+     }
+    ]
+   }
+  },
+  "de_mortar": {
+   "crew": [
+    {
+     "unit": "de_mortar_gunner",
+     "x": -27.7,
+     "y": 26.0,
+     "heading": 0
+    },
+    {
+     "unit": "de_loader_bomb",
+     "x": -3.7,
+     "y": -34.0,
+     "heading": 90
+    }
+   ],
+   "moving": {
+    "weapon": null,
+    "crew": [
+     {
+      "unit": "de_tube_carrier"
+     },
+     {
+      "unit": "de_baseplate_carrier"
+     }
+    ]
+   }
+  },
+  "de_tripod_mg": {
+   "crew": [
+    {
+     "unit": "de_mg_gunner",
+     "x": -53.7,
+     "y": 0.0,
+     "heading": 0
+    },
+    {
+     "unit": "de_loader_box",
+     "x": -18.9,
+     "y": 34.0,
+     "heading": 0
+    }
+   ],
+   "moving": {
+    "weapon": null,
+    "crew": [
+     {
+      "unit": "de_mg_carrier"
+     },
+     {
+      "unit": "de_tripod_carrier"
+     }
+    ]
+   }
+  },
+  "de_howitzer": {
+   "crew": [
+    {
+     "unit": "de_at_gunner",
+     "x": 2.1,
+     "y": 32.0,
+     "heading": 0
+    },
+    {
+     "unit": "de_at_loader",
+     "x": -22.9,
+     "y": -34.0,
+     "heading": 45
+    },
+    {
+     "unit": "de_at_commander",
+     "x": -67.9,
+     "y": 55.0,
+     "heading": 0
+    }
+   ]
+  },
+  "de_rocket_gunner": {
+   "crew": [
+    {
+     "unit": "de_loader_rocket",
+     "x": -34,
+     "y": -34,
+     "heading": 0
+    }
+   ]
+  }
+ }
+}
