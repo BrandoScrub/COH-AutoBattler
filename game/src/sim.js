@@ -91,13 +91,13 @@ const SIM = (() => {
   }
   function canPlace(G, owner, defId, x, y) {
     const def = D.BUILDINGS[defId], m = G.map;
-    for (let yy = Math.floor(y - def.size[1] / 2 - 1); yy < Math.ceil(y + def.size[1] / 2 + 1); yy++) for (let xx = Math.floor(x - def.size[0] / 2 - 1); xx < Math.ceil(x + def.size[0] / 2 + 1); xx++) {
+    for (let yy = Math.floor(y - def.size[1] / 2); yy < Math.ceil(y + def.size[1] / 2); yy++) for (let xx = Math.floor(x - def.size[0] / 2); xx < Math.ceil(x + def.size[0] / 2); xx++) {
       if (xx < 2 || yy < 2 || xx >= m.w - 2 || yy >= m.h - 2) return 'Off the map';
-      if (m.block[yy * m.w + xx] & (MAP.BI | MAP.BV)) return 'Blocked';
+      if (m.block[yy * m.w + xx] & (MAP.BI | MAP.BV)) return 'Something is in the way';
     }
     const S = MAP.sectorAt(m, x, y);
-    if (S.owner !== owner || !S.supplied) return 'Must be in your supplied territory';
-    for (const p of m.points) if (U.dist2(x, y, p.x, p.y) < 14 * 14) return 'Too close to a capture point';
+    if (S.owner !== owner || !S.supplied) return 'Build inside your own connected territory';
+    for (const p of m.points) if (U.dist2(x, y, p.x, p.y) < (p.radius + 5) ** 2) return 'Too close to a capture point';
     return null;
   }
 
@@ -154,6 +154,15 @@ const SIM = (() => {
       });
       return;
     }
+    if (o.type === 'build') {
+      // one squad places it and pays; any other selected builders join the same job
+      const builders = ents.filter(e => e.type === 'squad' && e.def.builder);
+      if (!builders.length) return;
+      orderEnt(G, builders[0], o, queue);
+      const jobs = builders[0].buildQueue || [];
+      for (const b of builders.slice(1)) if (jobs.length) { b.buildQueue = jobs.map(j => ({ ...j })); b.order = { type: 'build' }; b.path = null; b.slots = null; b.retreating = false; }
+      return;
+    }
     for (const e of ents) orderEnt(G, e, o, queue);
   }
   function orderEnt(G, e, o, queue) {
@@ -165,6 +174,8 @@ const SIM = (() => {
     switch (o.type) {
       case 'stop': e.order = { type: 'idle' }; e.path = null; e.target = null; e.retreating = false; e.forceTarget = null; break;
       case 'move': case 'attackMove': case 'reverse':
+        // a team weapon told to go where it already stands just turns to face the new way
+        if (e.crew && e.crew.state !== 'packed' && Math.hypot(o.x - e.crew.x, o.y - e.crew.y) < 3) { if (o.face != null && Math.abs(U.angNorm(o.face - e.crew.heading)) > .3) setup(G, e, o.face); return; }
         e.retreating = false; e.forceTarget = null;
         e.order = { type: o.type, x: o.x, y: o.y, face: o.face };
         setPath(G, e, o.x, o.y);
@@ -209,7 +220,7 @@ const SIM = (() => {
     sq.crew.x = sq.x; sq.crew.y = sq.y; sq.slots = null;
   }
   function teardown(G, sq) {
-    const w = weaponOf(sq); if (!w) return;
+    const w = weaponOf(sq); if (!w || sq.crew.state === 'tearing' || sq.crew.state === 'packed') return;   // a new order must not restart the pack-up
     sq.crew.state = 'tearing'; sq.crew.t = w.teardown || 1.8;
   }
   const crewReady = sq => !sq.crew || sq.crew.state === 'deployed';
@@ -245,8 +256,9 @@ const SIM = (() => {
         b.queue.shift();
         const ang = Math.atan2(b.rally.y - b.y, b.rally.x - b.x);
         const sx = b.x + Math.cos(ang) * (b.w * .5 + 2), sy = b.y + Math.sin(ang) * (b.d * .5 + 2);
-        const p = MAP.nearestOpen(MAP.navGrids(G.map).inf, G.map, sx, sy);
-        const e = D.SQUADS[q.unit] ? spawnSquad(G, q.unit, b.owner, p.x, p.y) : spawnVehicle(G, q.unit, b.owner, p.x, p.y, ang);
+        const isV = !D.SQUADS[q.unit], nav = MAP.navGrids(G.map);
+        const p = MAP.nearestOpen(isV ? nav.veh : nav.inf, G.map, sx, sy);   // vehicles need ground a vehicle can use
+        const e = isV ? spawnVehicle(G, q.unit, b.owner, p.x, p.y, ang) : spawnSquad(G, q.unit, b.owner, p.x, p.y);
         orderEnt(G, e, { type: 'move', x: b.rally.x + G.rng.range(-3, 3), y: b.rally.y + G.rng.range(-3, 3) });
         event(G, b.owner, 'ready', e.def.name + ' ready', e.x, e.y);
         popRecount(G);
@@ -298,8 +310,11 @@ const SIM = (() => {
       const px = job.kind === 'building' ? tgt.x : (tgt.ax + tgt.bx) / 2, py = job.kind === 'building' ? tgt.y : (tgt.ay + tgt.by) / 2;
       const reach = job.kind === 'building' ? Math.max(tgt.w, tgt.d) / 2 + 3 : 3.5;
       const d = Math.hypot(sq.x - px, sq.y - py);
-      if (d > reach) { if (!sq.path || !sq.path.length) { const side = job.kind === 'building' ? nearEdge(sq, tgt) : { x: px - Math.sin(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6, y: py + Math.cos(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6 }; setPath(G, sq, side.x, side.y); } return true; }
-      sq.path = null; sq.building = true; sq.buildAt = { x: px, y: py };
+      if (d > reach) {
+        // a job it cannot reach for 20 s is dropped (the building or wall stays, another squad can finish it)
+        sq.reachT = (sq.reachT || 0) + dt; if (sq.reachT > 20) { sq.reachT = 0; sq.buildQueue.shift(); event(G, sq.owner, 'error', 'Engineers cannot reach the construction site', px, py); continue; }
+        if (!sq.path || !sq.path.length) { const side = job.kind === 'building' ? nearEdge(sq, tgt) : { x: px - Math.sin(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6, y: py + Math.cos(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6 }; setPath(G, sq, side.x, side.y); } return true; }
+      sq.path = null; sq.building = true; sq.buildAt = { x: px, y: py }; sq.reachT = 0;
       const vb = sq.vet >= 2 ? 1.35 : 1, rate = dt * vb * Math.max(.4, sq.models.filter(m => m.alive).length / sq.maxModels);
       if (job.kind === 'building') {
         tgt.built = Math.min(1, tgt.built + rate / tgt.def.time); tgt.hp = Math.min(tgt.maxHp, tgt.hp + tgt.maxHp * .9 * rate / tgt.def.time);
@@ -320,8 +335,9 @@ const SIM = (() => {
   function stepRepair(G, sq, dt) {
     const t = G.byId.get(sq.order.target);
     if (!t || t.dead || t.hp >= t.maxHp || t.owner !== sq.owner) { sq.order = { type: 'idle' }; sq.building = false; return; }
-    const d = Math.hypot(sq.x - t.x, sq.y - t.y);
-    if (d > 7) { if (!sq.path || !sq.path.length) setPath(G, sq, t.x, t.y); sq.building = false; return; }
+    // distance to the target's edge: a building is wide, a vehicle a few metres long
+    const half = t.type === 'building' ? Math.max(t.w, t.d) / 2 : (t.def.length || 4) / 2, d = Math.hypot(sq.x - t.x, sq.y - t.y) - half;
+    if (d > 6) { if (!sq.path || !sq.path.length || sq.repathT < G.t) { const p = t.type === 'building' ? nearEdge(sq, t) : t; setPath(G, sq, p.x, p.y); sq.repathT = G.t + 2; } sq.building = false; return; }
     sq.path = null; sq.building = true; sq.buildAt = { x: t.x, y: t.y };
     t.hp = Math.min(t.maxHp, t.hp + (sq.def.repair || 8) * sq.models.filter(m => m.alive).length / sq.maxModels * dt * (sq.vet >= 2 ? 1.4 : 1));
   }
@@ -351,6 +367,7 @@ const SIM = (() => {
     if (d > ab.range - 1) { if (!e.path || !e.path.length) setPath(G, e, o.x, o.y); return; }
     e.path = null;
     const thrower = e.models.find(m => m.alive); if (!thrower) return;
+    if (!canAfford(G.players[e.owner], ab.cost)) { e.order = { type: 'idle' }; event(G, e.owner, 'error', 'Not enough munitions', e.x, e.y); return; }
     pay(G.players[e.owner], ab.cost); e.cooldowns[o.id] = G.t + ab.cooldown;
     COMBAT.throwGrenade(G, e, thrower, o.x, o.y, ab);
     e.order = { type: 'idle' };
@@ -392,8 +409,10 @@ const SIM = (() => {
       if (!m.alive) continue;
       let tx, ty;
       if (sq.crew && sq.crew.state !== 'packed') { const p = crewSlot(G, sq, k); tx = p.x; ty = p.y; }
-      else if (slotsFor && slotsFor[k]) { tx = slotsFor[k].x; ty = slotsFor[k].y; }
-      else {
+      else if (slotsFor && slotsFor[k]) {
+        if (!MAP.walkable(nav, G.map, slotsFor[k].x, slotsFor[k].y)) { const o = MAP.nearestOpen(nav, G.map, slotsFor[k].x, slotsFor[k].y); slotsFor[k].x = o.x; slotsFor[k].y = o.y; }
+        tx = slotsFor[k].x; ty = slotsFor[k].y;
+      } else {
         const o = sq.offsets[m.i % sq.offsets.length], h = sq.heading;
         tx = sq.x + Math.cos(h) * o.f - Math.sin(h) * o.s + m.jx; ty = sq.y + Math.sin(h) * o.f + Math.cos(h) * o.s + m.jy;
         if (!MAP.walkable(nav, G.map, tx, ty) || !MAP.lineClear(nav, G.map, m.x, m.y, tx, ty)) {
@@ -412,6 +431,8 @@ const SIM = (() => {
         if (step > .01) m.heading = Math.atan2(dy, dx);
       }
       m.vx = step / dt;
+      // safety net: a man left inside an obstacle (a building raised on him, a wall built through him) steps out
+      if (!MAP.walkable(nav, G.map, m.x, m.y) && !(sq.crew && sq.crew.state !== 'packed')) { m.blockT = (m.blockT || 0) + dt; if (m.blockT > 2) { const o = MAP.nearestOpen(nav, G.map, m.x, m.y); m.x = o.x; m.y = o.y; m.blockT = 0; sq.slots = null; } } else m.blockT = 0;
       k++;
     }
     // keep the squad's anchor on its men when it is not walking a path
@@ -451,8 +472,8 @@ const SIM = (() => {
     cands.sort((a, b) => a.d - b.d);
     for (let i = 0; i < n; i++) {
       if (cands[i] && i < cands.length) { out.push(cands[i]); continue; }
-      const o = sq.offsets[i % sq.offsets.length];
-      out.push({ x: sq.x + fx * o.f * .8 - fy * o.s, y: sq.y + fy * o.f * .8 + fx * o.s });
+      const o = sq.offsets[i % sq.offsets.length], nav = MAP.navGrids(G.map).inf;
+      out.push(MAP.nearestOpen(nav, G.map, sq.x + fx * o.f * .8 - fy * o.s, sq.y + fy * o.f * .8 + fx * o.s));
     }
     return out;
   }
@@ -469,6 +490,8 @@ const SIM = (() => {
   function stepVehicleMove(G, v, dt) {
     const def = v.def;
     if (v.path && v.pathVer !== G.map.version && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); }
+    // a vehicle found inside an obstacle (a building raised round it, a wreck) is moved to open ground at once
+    { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
     let target = null;
     if (v.path && v.path.length && !(v.order.type === 'attackMove' && v.engageT > G.t)) target = v.path[0];
     const accel = def.accel, maxSp = def.speed * (v.vet >= 3 && v.defId === 'us_chaffee' ? 1.33 : 1);
@@ -480,15 +503,21 @@ const SIM = (() => {
       const off = Math.abs(U.angNorm(want - v.heading));
       const desired = off > 1.2 ? maxSp * .15 : off > .5 ? maxSp * .5 : maxSp * (rev ? .45 : 1);
       const slow = v.path.length === 1 ? Math.min(1, d / 6 + .2) : 1;
-      v.speed = U.turnTo(v.speed, desired * slow, accel * dt);
+      v.speed = U.approach(v.speed, desired * slow, accel * dt);
       if (d < 1.5 || (d < v.speed * dt * 2)) { v.path.shift(); if (!v.path.length) vehicleArrive(G, v); }
-    } else v.speed = U.turnTo(v.speed, 0, accel * 2 * dt);
+    } else v.speed = U.approach(v.speed, 0, accel * 2 * dt);
     if (v.speed > .01) {
       const dir = v.order.type === 'reverse' ? -1 : 1;
       const nx = v.x + Math.cos(v.heading) * v.speed * dt * dir, ny = v.y + Math.sin(v.heading) * v.speed * dt * dir;
       const grid = MAP.navGrids(G.map).veh;
       if (MAP.walkable(grid, G.map, nx, ny) || !MAP.walkable(grid, G.map, v.x, v.y)) { v.x = nx; v.y = ny; v.dist += v.speed * dt; v.stuckT = 0; }
-      else { v.speed = 0; v.stuckT += dt; if (v.stuckT > 1 && v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); v.stuckT = 0; } }
+      else {
+        // sidestep: try sliding past the corner before giving up
+        const st = v.speed * dt * dir; let moved = false;
+        for (const a of [.6, -.6, 1.2, -1.2]) { const sx = v.x + Math.cos(v.heading + a) * st, sy = v.y + Math.sin(v.heading + a) * st; if (MAP.walkable(grid, G.map, sx, sy)) { v.x = sx; v.y = sy; v.dist += Math.abs(st); moved = true; break; } }
+        if (!moved) { v.speed *= .5; v.stuckT += dt; }
+        if (v.stuckT > 1.2 && v.path && v.path.length) { const end = v.path[v.path.length - 1]; const o = MAP.nearestOpen(grid, G.map, v.x + Math.cos(v.heading + Math.PI) * 1.5, v.y + Math.sin(v.heading + Math.PI) * 1.5); if (v.stuckT > 3) { v.x = o.x; v.y = o.y; } setPath(G, v, end.x, end.y); if (v.stuckT > 3) v.stuckT = 0; }
+      }
       crush(G, v);
     }
     // vehicles push each other apart

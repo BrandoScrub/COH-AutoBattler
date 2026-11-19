@@ -13,4 +13,8 @@ The same text is in `CLAUDE.md` and `AGENTS.md`; change both together.
   `tools/build_art.py` refuses otherwise. A unit's heading count comes from its data entry.
 - **Art is committed.** After `tools/build_art.py`, look at the previews (`tools/preview_units.py art docs/previews`),
   refresh the README unit table (`tools/list_units.py`) if keys or clips changed, and commit `art/` with the change.
+- **Game code lives in `game/`.** Numbers go in `game/src/data.js` with their source (CoH3 game data where a counterpart
+  exists, `standIn` where not); `data/units.json` stays the art roster. Before a commit that touches `game/`:
+  `node game/test/soak.js 8 18` prints `no problems`, and `game/test/flow.py de` and `game/test/mobile.py` print
+  `no page errors` (serve the root on port 8765 first). Keep the PC and phone layouts both working.
 - Before a commit: `python3 tools/check.py` prints `TOTAL 0`; `python3 tools/update_artkit.py --verify` passes.

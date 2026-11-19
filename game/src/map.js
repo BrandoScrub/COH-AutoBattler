@@ -21,7 +21,7 @@ const MAP = (() => {
     const mir = p => ({ ...p, x: p.y, y: p.x });
 
     /* ---- bases: side A (left of screen) and side B (right) ---- */
-    m.bases = [{ slot: 0, x: 24, y: 176, hq: { x: 24, y: 176 } }, { slot: 1, x: 176, y: 24, hq: { x: 176, y: 24 } }];
+    m.bases = [{ slot: 0, x: 26, y: 174, hq: { x: 26, y: 174 } }, { slot: 1, x: 174, y: 26, hq: { x: 174, y: 26 } }];
 
     /* ---- roads (symmetric polylines) ---- */
     m.roads = [
@@ -91,7 +91,12 @@ const MAP = (() => {
       return c;
     };
     m.addCover = addCover;
-    const addBoth = (kind, ax, ay, bx, by, opts) => { addCover(kind, ax, ay, bx, by, opts); if (Math.abs(ax - ay) + Math.abs(bx - by) > 4) addCover(kind, ay, ax, by, bx, opts); };
+    /* field walls and hedges stay out of the bases, so there is open ground to build on */
+    const nearBase = (ax, ay, bx, by) => m.bases.some(b => U.segDist2(b.x, b.y, ax, ay, bx, by) < 38 * 38);
+    const addBoth = (kind, ax, ay, bx, by, opts) => {
+      if (!nearBase(ax, ay, bx, by)) addCover(kind, ax, ay, bx, by, opts);
+      if (Math.abs(ax - ay) + Math.abs(bx - by) > 4 && !nearBase(ay, ax, by, bx)) addCover(kind, ay, ax, by, bx, opts);
+    };
 
     /* stone walls along field edges and lanes */
     const halfWalls = [
@@ -226,7 +231,7 @@ const MAP = (() => {
   function buildSectors(m) {
     const gw = m.w / SEC, gh = m.h / SEC, g = new Int16Array(gw * gh);
     const seeds = [];
-    m.bases.forEach((b, i) => { seeds.push({ x: b.x, y: b.y, base: i, w: .62 }); });
+    m.bases.forEach((b, i) => { seeds.push({ x: b.x, y: b.y, base: i, w: .42 }); });
     m.points.forEach(p => seeds.push({ x: p.x, y: p.y, point: p.id, w: 1 }));
     for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
       const wx = x * SEC + SEC / 2, wy = y * SEC + SEC / 2;

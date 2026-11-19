@@ -167,6 +167,7 @@ const HUD = (() => {
     let ids = builderId ? [builderId] : null;
     if (!ids) { const bs = G.ents.filter(e => e.type === 'squad' && e.owner === 0 && !e.dead && e.def.builder); if (!bs.length) { flash('No Pioneers to build it'); return; } bs.sort((a, b) => (a.order.type === 'build') - (b.order.type === 'build')); ids = [bs[0].id]; }
     ui.mode = { type: 'place', what: bid, ids };
+    if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap or drag to place it. Green fits, red shows why not.'); }
   }
   function slotColAct(a) {
     const P = G.players[0];
@@ -351,9 +352,12 @@ const HUD = (() => {
   }
   function pointAt(sx, sy) { const [wx, wy] = RENDER.toWorld(sx, sy); for (const p of G.map.points) { const [x, y] = RENDER.toScreen(p.x, p.y, 8.5); if ((x - sx) ** 2 + (y - sy) ** 2 < 15 * 15 || U.dist2(wx, wy, p.x, p.y) < 2.5 * 2.5) return p; } return null; }
   function overHud(t) { return t !== canvasEl; }
+  let pageBound = false;
   function bindInput() {
-    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
     el.mmc.addEventListener('contextmenu', e => e.preventDefault());
+    bindMinimapMouse();
+    if (pageBound) return;
+    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
     canvasEl.addEventListener('mousedown', e => {
       mouse.x = e.clientX; mouse.y = e.clientY;
       if (e.button === 0) { mouse.down = true; mouse.drag = { x: e.clientX, y: e.clientY, shift: e.shiftKey }; if (ui.mode && ui.mode.type === 'line') { const [wx, wy] = RENDER.toWorld(e.clientX, e.clientY); ui.mode.start = { x: wx, y: wy }; } }
@@ -370,16 +374,18 @@ const HUD = (() => {
       if (e.button === 2 && mouse.rdown) { if (!overHud(e.target)) rightUp(e); mouse.rdown = null; }
     });
     canvasEl.addEventListener('wheel', e => { e.preventDefault(); const before = RENDER.toWorld(e.clientX, e.clientY); RENDER.cam.k *= e.deltaY < 0 ? 1.1 : 1 / 1.1; RENDER.clampCam(G); const after = RENDER.toWorld(e.clientX, e.clientY); RENDER.cam.x += before[0] - after[0]; RENDER.cam.y += before[1] - after[1]; }, { passive: false });
+    window.addEventListener('mouseup', () => { mouse.mmDrag = false; });
+    window.addEventListener('keydown', keyDown);
+    document.addEventListener('mouseleave', () => { mouse.inCanvas = false; });
+    window.addEventListener('keyup', e => { keys.delete(e.key); });
+  }
+  function bindMinimapMouse() {
     el.mmc.addEventListener('mousedown', e => {
       const [wx, wy] = mmEventWorld(e);
       if (e.button === 0) { RENDER.cam.x = wx; RENDER.cam.y = wy; mouse.mmDrag = true; }
       if (e.button === 2) { const ids = selEnts().filter(s => s.owner === 0).map(s => s.id); if (ids.length) SIM.issue(G, ids, { type: 'move', x: wx, y: wy }, e.shiftKey); }
     });
     el.mmc.addEventListener('mousemove', e => { if (mouse.mmDrag && e.buttons & 1) { const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; } });
-    window.addEventListener('mouseup', () => { mouse.mmDrag = false; });
-    window.addEventListener('keydown', keyDown);
-    document.addEventListener('mouseleave', () => { mouse.inCanvas = false; });
-    window.addEventListener('keyup', e => { keys.delete(e.key); });
   }
   const keys = new Set();
   function keyDown(e) {
@@ -409,8 +415,14 @@ const HUD = (() => {
       if (m.type === 'attackMove' || m.type === 'reverse') { SIM.issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); if (!e.shiftKey) ui.mode = null; return; }
       if (m.type === 'ability') { const ent = G.byId.get(ids[0]); if (ent) SIM.issue(G, [ent.id], { type: 'ability', id: m.id, x: wx, y: wy }); ui.mode = null; return; }
       if (m.type === 'rally') { SIM.issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
-      if (m.type === 'place') { const err = SIM.canPlace(G, 0, m.what, wx, wy); if (err) { flash(err); return; } SIM.issue(G, m.ids, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; return; }
-      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; SIM.issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
+      if (m.type === 'place') {
+        const err = SIM.canPlace(G, 0, m.what, wx, wy) || SIM.buildReqMissing(G, 0, m.what) || (!SIM.canAfford(G.players[0], DATA.BUILDINGS[m.what].cost) ? 'Not enough resources' : null);
+        if (err) { flash(err); return; }
+        const builders = m.ids.filter(id => { const b = G.byId.get(id); return b && !b.dead; });
+        if (!builders.length) { flash('No engineers left to build it'); ui.mode = null; return; }
+        SIM.issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + ' placed'); return;
+      }
+      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; SIM.issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
       if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) SIM.issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
       if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') SIM.issue(G, m.ids, { type: 'repair', target: t.id }); ui.mode = null; return; }
     }
@@ -472,11 +484,15 @@ const HUD = (() => {
     const [wx, wy] = RENDER.toWorld(x, y); SIM.issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move');
   }
   function bindTouch() {
+    bindTouchHud();
+    if (pageBound) return;
+    pageBound = true;
     canvasEl.style.touchAction = 'none';
     canvasEl.addEventListener('pointerdown', e => {
       if (e.pointerType !== 'touch') return;
       e.preventDefault(); ui.touch = true;
       touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (ui.mode) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = true; }
       if (touch.pts.size === 1) {
         touch.start = { x: e.clientX, y: e.clientY, t: performance.now(), cx: RENDER.cam.x, cy: RENDER.cam.y }; touch.moved = false;
         clearTimeout(touch.lp); touch.lp = setTimeout(() => { if (!touch.moved && touch.pts.size === 1) { touch.longed = true; longPressAt(touch.start.x, touch.start.y); } }, 550); touch.longed = false;
@@ -502,6 +518,7 @@ const HUD = (() => {
       if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10) { touch.moved = true; clearTimeout(touch.lp); }
       if (!touch.moved) return;
       if (ui.boxMode) { mouse.x = e.clientX; mouse.y = e.clientY; return; }
+      if (ui.mode && (ui.mode.type === 'place' || ui.mode.type === 'line' && ui.mode.start)) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = true; return; }   // drag the outline, not the camera
       const k = RENDER.cam.k, dx = (e.clientX - s.x) / (22 * k), dy = (e.clientY - s.y) / (11 * k);
       RENDER.cam.x = s.cx - (dx + dy) / 2; RENDER.cam.y = s.cy - (dy - dx) / 2; RENDER.clampCam(G);
     });
@@ -511,10 +528,14 @@ const HUD = (() => {
       if (touch.pts.size) { const [p] = [...touch.pts.values()]; touch.start = { x: p.x, y: p.y, t: 0, cx: RENDER.cam.x, cy: RENDER.cam.y }; touch.pinch = null; return; }
       touch.pinch = null;
       if (ui.boxMode && mouse.drag) { if (touch.moved) leftUp(fake(e.clientX, e.clientY, ui.multi)); mouse.down = false; mouse.drag = null; if (touch.moved) { ui.boxMode = false; syncToolbar(); return; } }
+      if (e.type === 'pointerup' && ui.mode && ui.mode.type === 'place' && touch.moved) { tapAt(mouse.x, mouse.y); touch.start = null; return; }   // drag-to-place: lift to build
+      if (e.type === 'pointerup' && ui.mode && ui.mode.type === 'line' && ui.mode.start && touch.moved) { tapAt(mouse.x, mouse.y); touch.start = null; return; }
       if (e.type === 'pointerup' && !touch.moved && !touch.longed && touch.start) tapAt(touch.start.x, touch.start.y);
       touch.start = null;
     };
     canvasEl.addEventListener('pointerup', end); canvasEl.addEventListener('pointercancel', end);
+  }
+  function bindTouchHud() {
     // minimap: tap moves the camera, tap with units selected after a tap on the camera does not order (use the field)
     el.mmc.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') return; e.preventDefault(); ui.touch = true; const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; el.mmc._drag = true; });
     el.mmc.addEventListener('pointermove', e => { if (e.pointerType !== 'touch' || !el.mmc._drag) return; const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; });

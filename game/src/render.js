@@ -139,7 +139,8 @@ const RENDER = (() => {
   /* ---------------- per-frame ---------------- */
   function init(canvasEl, lib, G) {
     R.canvas = canvasEl; R.lib = lib;
-    R.ctx = (typeof GLCanvas !== 'undefined' ? GLCanvas.create(canvasEl) : canvasEl.getContext('2d'));
+    if (!R.ctx) R.ctx = (typeof GLCanvas !== 'undefined' ? GLCanvas.create(canvasEl) : canvasEl.getContext('2d'));   // one context per page
+    R.fogImg = null; R.mem = new Map();
     buildGround(G); propSprites();
     R.fogC = canvas(G.map.w / FOG.C, G.map.h / FOG.C);
     R.cam.x = G.map.bases[0].x + 16; R.cam.y = G.map.bases[0].y - 16;
@@ -193,7 +194,7 @@ const RENDER = (() => {
     for (const e of G.ents) {
       if (e.dead) continue;
       if (!FOG.visible(G, me, e) && !(e.type === 'building')) continue;
-      if (e.type === 'building') { if (vis(e.x, e.y, 300)) list.push({ d: e.x + e.y + (e.w + e.d) * .2, f: () => drawBuilding(G, c, e, k, ui) }); continue; }
+      if (e.type === 'building') { if (e.owner !== me && !FOG.explored(G, me, e.x, e.y)) continue; if (vis(e.x, e.y, 300)) list.push({ d: e.x + e.y + (e.w + e.d) * .2, f: () => drawBuilding(G, c, e, k, ui) }); continue; }
       if (e.type === 'vehicle') { if (vis(e.x, e.y, 200)) { list.push({ d: e.x + e.y, f: () => drawVehicle(G, c, e, k) }); shadows.push(() => drawVehicleShadow(G, c, e, k)); } continue; }
       if (e.type === 'squad') {
         if (!vis(e.x, e.y, 120)) continue;
