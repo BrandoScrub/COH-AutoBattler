@@ -20,6 +20,8 @@ build note for our version. This is a layout and function reference only: our ic
 | [Headquarters selected](#headquarters-selected) | Match start: building panel, production buttons, reinforce toggle, battlegroup choice |
 | [Battlegroup panel](#battlegroup-panel) | Battlegroup unlock trees, node costs, pick-one pairs |
 | [MG team and buildings](#mg-team-and-buildings) | Firing arc, team weapon card, structure roster, point ring styles, kill count |
+| [Headquarters command card](#headquarters-command-card) | The HQ's card slot by slot, tab-to-building map, the four Wehrmacht buildings, starting economy, the HQ model |
+| [Pioneers at a resource point](#pioneers-at-a-resource-point) | Build menu page, free and priced defences, point yield on hover, map-placed sandbags, upkeep, minimap buttons |
 | [How the systems work](#how-the-systems-work) | Cover, flanking, territory supply, armour facing, height, garrisons |
 
 ## Campaign HUD
@@ -395,6 +397,129 @@ Numbers match the fifth screenshot: ten minutes in, an MG 42 team selected and s
 
 **22. Casualties** Fallen soldiers stay on the ground where they dropped.
 - *Build:* bodies persist for a while, then fade. Dropped weapons could stay as pick-ups.
+
+## Headquarters command card
+
+![Headquarters command card, annotated](boards/08-headquarters-command-card.jpg)
+
+Original: [screenshots/08-headquarters-command-card.jpg](screenshots/08-headquarters-command-card.jpg) · Legend image: [boards/08-headquarters-command-card-legend.png](boards/08-headquarters-command-card-legend.png)
+
+Numbers match the sixth screenshot: the same match as the headquarters board, one second later (00:06), with the Wehrmacht HQ still selected. That board covers the HUD at match start; this one goes slot by slot through the HQ's command card, the production tabs and the building itself. Own numbering. Costs, times and health are from CoH3 game data ([coh3stats.com](https://coh3stats.com/explorer/races/german)) and Relic's patch notes; confirm in game before locking values. Items 4 and 12 were confirmed in review.
+
+### Screen-anchored HUD
+
+**1. One tab per building** After an empty slot come five tabs: house (Headquarters), soldier (Infanterie Kompanie), shield (Luftwaffe Kompanie), half-track (Panzergrenadier Kompanie) and tank (Panzer Kompanie). That is the Wehrmacht's full building list, in tech order, and the same four buildings sit on the card's bottom row (6). Only the house is lit.
+- *Build:* tabs = the HQ plus each production building in the faction data, in tech order; lit once you own one (board 06, item 9).
+
+**2. T: red cross** Red cross with T at the top of the slot column, outside the 4 by 3 grid. Board 05 read this as the reinforce toggle, but the confirmed auto-reinforce toggle is A (4), so T is a separate building-level control; check its tooltip.
+- *Build:* building-level controls live in the slot column, not the grid.
+
+**3. Production row: Q and W** Units are shown as portraits. Q Pioneer Squad (125 manpower, 4 population, 18 s, 3 men). W Kettenkrad Recon Vehicle (160 manpower, 2 population, 20 s): unarmed, fast, captures points 1.5 times as fast as infantry. Population reads 4/100: exactly the one starting Pioneer squad.
+- *Build:* production buttons are unit portraits; the tooltip shows cost, population and build time.
+
+**4. A: auto-reinforce toggle** Red cross inside orange circular arrows, green light at the corner: the automatic reinforcement toggle, switched on (confirmed). While on, squads that have lost models are refilled automatically near the HQ, and every replacement model costs manpower (Pioneers about 22 a man). Off, squads stay under strength and the manpower is kept.
+- *Build:* per-player auto-reinforce flag on reinforce points; each model refilled charges the unit's reinforce cost. Toggle state shown as a corner light: green on, none off.
+
+**5. F: set rally point** Red flag on F, the far-right slot of the middle row. Click it, then click the ground; the cyan flag beside the HQ (board 05, item 13) marks the result.
+- *Build:* rally point is a targeted order on every production building, always in the same slot.
+
+**6. Bottom row: the four buildings** Y Infanterie Kompanie is lit (80 manpower, 15 fuel). X Luftwaffe (150, 50 fuel), C Panzergrenadier (150, 40) and V Panzer Kompanie (300, 135) are dim: unaffordable at 15 fuel, possibly also locked. By 00:20 (board 06) the Y button had vanished, a scaffold stood with Pioneers at it, and fuel had fallen from 15 to 2, which matches the Infanterie Kompanie's price. So buildings are ordered from the HQ card and raised by Pioneers.
+- *Build:* the HQ card holds one place-building button per tier; it charges on placement, then the button leaves the card.
+
+**7. Building panel** Owner name, Headquarters, the yellow Can Reinforce infantry line, then Produces: Pioneer Squads and Kettenkrad Recon Vehicles. The portrait is a small render of the HQ; the cyan bar under it is building health (3,000 in CoH3 data, the most of any Wehrmacht building).
+- *Build:* generate the Produces line from the building's unit list.
+
+**8. Starting economy** Manpower 494 (+270), munitions 25 with no rate, fuel 15 (+6), population 4/100. Fuel trickles in at +6 a minute with no points held: a base income. Relic's update 3.0 raised starting fuel income from 3 to 6 in every mode, which matches.
+- *Build:* base income: manpower 270 and fuel 6 per minute, munitions 0 until points are held; all match settings.
+
+### World-space markers
+
+**9. The Headquarters** A dug-in command post, not a house: a low armoured box in camouflage paint with a hatch on the roof, piled sandbags and debris on its flanks, and a radio dish at the back. It sits in the corner of the base, right against the base boundary. Selected, it shows the cyan footprint and edge glow from board 05.
+- *Build:* our HQ: a low fortified command post with a radio mast, present at match start, cannot be built or moved, about 3,000 health.
+
+**10. Starting Pioneers** Three Pioneers walking out from the HQ with their decorator (3 men, control group 1) above them. The whole starting army is this one squad; everything else comes from the HQ card. A matching decorator is pinned to the top-right screen edge.
+- *Build:* match start spawns one engineer squad per player beside the HQ, already in control group 1.
+
+**11. Concrete bunkers** Two concrete bunkers just outside the base, ringed with stones. Neutral emplacements either side can occupy; Pioneers can build the same kind of Concrete Bunker for 175 manpower.
+- *Build:* neutral bunker type with garrison slots and health, shared with the buildable one.
+
+**12. Rubble strip, not a trench** A stony strip runs from the top bunker down towards the left one. Confirmed not a trench: it is gravel or rubble on the ground surface, linking the two bunkers visually.
+- *Build:* ground decal only; no cover or movement effect unless testing shows otherwise.
+
+**13. Dune ridge** A raised sand ridge in front of the HQ. Height counts in CoH3: units on top shoot down past the target's cover (systems board), so the ridge is the strongest ground near the base.
+- *Build:* paint height bands into the map; the cover override reads them.
+
+## Pioneers at a resource point
+
+![Pioneers at a resource point, annotated](boards/09-pioneer-build-point.jpg)
+
+Original: [screenshots/09-pioneer-build-point.jpg](screenshots/09-pioneer-build-point.jpg) · Legend image: [boards/09-pioneer-build-point-legend.png](boards/09-pioneer-build-point-legend.png)
+
+Numbers match the seventh screenshot: 01:28 into a skirmish, a Pioneer squad selected with its construction menu open while the cursor hovers a neutral munitions point ringed by sandbags. Own numbering; call-in slots and the faction badge are as on earlier boards. Costs and times are from CoH3 game data ([coh3stats.com](https://coh3stats.com/explorer/races/german/units/pioneer_ger)); confirm in game before locking values.
+
+### Screen-anchored HUD
+
+**1. Victory ticker at 01:28** Still 575 to 575 with all three stars grey a minute and a half in. Nobody holds a victory point yet, so neither total has moved.
+- *Build:* drain only runs while one side holds more victory points than the other; level means no tick.
+
+**2. Army roster, early** Top-right anchor as on board 07. From the left: a dark tile with a small progress bar on top (probably a unit still in production), the Pioneers (wrench, 3 men, control group 1), then two infantry squads with model counts, one showing a yellow light-cover shield.
+- *Build:* give a queued unit its roster tile with a progress bar as soon as it is bought; it becomes the normal icon when the unit spawns.
+
+**3. Battlegroup picked** The three choice tiles from boards 05 and 06 are gone. One ability tile with a portrait, a 19 countdown and STRG+F1 sits above the command-point dial, which reads 0 with a gold arc about two-thirds round. A battlegroup has been confirmed and its first ability is recharging; probably the free 0-cost node (board 06, item 6).
+- *Build:* after confirming, show only unlocked abilities in the strip; the dial's arc is progress to the next command point.
+
+**4. Minimap point types and teams** Four point glyphs: stars (victory points), plain squares, circles and hatched diamonds, so the glyph shape is the point type. Own units blue, allies cyan, yellow and green (a four-a-side match), enemy base sector red at the left, white camera triangle at the top. A few points carry a white glow ring, likely being captured.
+- *Build:* one glyph per point type, always drawn even in fog; pip colour comes from the player slot (own, each ally, enemy).
+
+**5. Minimap button row** The row skipped on earlier boards. Menu, then the tank button (selects all vehicles) and the soldier button (selects all infantry), both confirmed; the game logo; then three pings: red crosshair (attack here), blue shield (defend here) and a green frame (probably focus here). Above it: the gold tactical-map button at the left and pause at the right.
+- *Build:* menu, select-all and tactical map are needed in single player; pings wait until there are allies to read them.
+
+**6. Resources and upkeep** Manpower 38 (+263), munitions 32 (+10), fuel 13 (+10), population 16/100. Manpower income has dropped from +270 at the start (board 08) to +263: upkeep. Every unit on the field costs manpower per minute (Pioneers 4.2), so a bigger army earns less.
+- *Build:* net manpower rate = base income minus the sum of unit upkeep; show the net figure.
+
+**7. Second tab lit** House (HQ) and soldier tabs are lit, so the Infanterie Kompanie stands by 01:28. Shield, half-track and tank tabs are still dim. Board 08 maps each tab to its building.
+- *Build:* no change from boards 05 and 06.
+
+**8. Pioneer unit panel** Role tags read Support Infantry / Repair / Defense Builder. XP 0/500 matches the Pioneers' first veterancy step (500, then 1,500 and 3,000). Squad 3/3 (Pioneers are three men, 125 manpower, 4 population). The portrait carries a wrench class badge and a small 0 at its lower right, probably kills.
+- *Build:* veterancy thresholds are per-unit data, e.g. Pioneers [500, 1500, 3000].
+
+**9. Build menu: field defences** The command card has switched to the Pioneers' construction page. Q sandbag wall, W barbed wire, E tank trap: all free, paid in build time only (6 s, 3 s and 9 s). Sandbags give heavy cover. Wire stops infantry and is crushed by heavier vehicles. Tank traps stop vehicles, give heavy cover, and only heavy tanks break through.
+- *Build:* free defences are placed by dragging a line; cost is build time, not resources.
+
+**10. Build menu: priced items** R, S and Y are greyed while A is lit. That fits the prices against 38 manpower and 32 munitions: manpower builds such as the Fighting Nest (50), Concrete Bunker (175) and Resource Cache (200) are out of reach, while A, an explosive (a Schu-mine is 30 munitions), is affordable. The Pioneers can build 17 things in all, so the page shows a subset.
+- *Build:* grey a build button whenever its cost or prerequisite isn't met, and name what's missing in the tooltip.
+
+**11. Back to orders** A large back arrow in the bottom-right slot returns the card to the squad's normal orders. Construction is a second page of the same 4 by 3 grid, so build items reuse the grid keys.
+- *Build:* command card pages: orders and build. The back button always takes the bottom-right slot.
+
+### World-space markers
+
+**12. Point yield on hover** A munitions icon with a +10 tag floats over the point while the cursor rests on it: the point's yield, +10 munitions per minute. The red 1.2 tag on board 04 is probably the same readout.
+- *Build:* hovering a point shows its resource type and income per minute.
+
+**13. Neutral capture ring** White dash-dot ring: the capture radius of a point nobody owns, sized well past the sandbags' inner edge.
+- *Build:* same ring decal as board 06 (16); white while neutral.
+
+**14. Munitions point model** A bare flagpole with ammunition crates and a loose belt of rounds at its foot. The prop tells you the point type before you read any icon. No flag is up while it is neutral.
+- *Build:* point = pole plus a resource-type prop; the flag climbs the pole with capture progress.
+
+**15. Map-placed sandbags** Three curved sandbag walls ring the point at 01:28, too long and too early to be player-built: cover that ships with the map. Sandbags are heavy cover and face outward, so an attacker has to flank or go around them.
+- *Build:* maps place cover lines around key points using the same object Pioneers build.
+
+**16. Supply crates** Stacks of crates and ammunition boxes at the ends of the walls. Probably light cover that breaks when shelled.
+- *Build:* small destructible props with a light-cover tag.
+
+**17. Pioneers in the scrub** Wrench decorator, 3 men, control group 1 above it: the squad shown in the panel, standing in the tree line. The men are hidden in the scrub but the decorator still draws.
+- *Build:* decorators draw even when foliage hides the models.
+
+**18. Rock outcrops** Red rock and raised ground on the left. Blocks movement and sight; units on top shoot down past cover (systems board).
+- *Build:* impassable, sight-blocking mask with a height band on top.
+
+**19. Concrete block** A broken concrete block at the right: heavy cover that nobody built and that only explosives remove.
+- *Build:* neutral heavy-cover prop with health.
+
+**20. Palms and scrub** Palms and dense scrub everywhere. They break up sight lines; whether they also give cover is not clear from the shot.
+- *Build:* keep a concealment tag separate from the cover classes; confirm in game.
 
 ## How the systems work
 
