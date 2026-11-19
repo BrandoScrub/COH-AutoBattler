@@ -128,6 +128,11 @@ const AI = (() => {
           if (tgt) { SIM.issue(G, [e.id], { type: 'ability', id: 'barrage', x: tgt.x, y: tgt.y }); continue; }
         }
       }
+      // crew abandoned guns and pick up dropped weapons nearby when no enemy is close to them
+      if (SIM.canPickUp(e) && e.order.type !== 'pickup' && G.drops && G.drops.length && G.rng() < .5) {
+        const d = G.drops.find(d => U.dist2(d.x, d.y, e.x, e.y) < 22 * 22 && (d.kind === 'team' ? e.models.filter(m => m.alive).length >= 3 : (e.picked || 0) < 2) && FOG.seen(G, slot, d.x, d.y) && !visibleEnemies.some(o => U.dist2(o.x, o.y, d.x, d.y) < 15 * 15));
+        if (d) { SIM.issue(G, [e.id], { type: 'pickup', drop: d.id }); continue; }
+      }
       // a garrison mostly holds its house
       if (e.garrison != null && G.rng() > .04) continue;
       // busy moving or fighting: let it be, but re-target now and then

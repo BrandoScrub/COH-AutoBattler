@@ -185,6 +185,8 @@ const HUD = (() => {
 
   /* ---------------- update (10x a second) ---------------- */
   function update() {
+    // a selected squad that crewed a gun: the new gun team joins the selection (and replaces the squad if it is gone)
+    if (G.became) for (const id of [...ui.selected]) { const nid = G.became[id]; if (nid != null) { ui.selected.add(nid); if (!G.byId.get(id)) ui.selected.delete(id); delete G.became[id]; } }
     const P = G.players[0], E = G.players[1];
     // ticker
     const vpS = D.ECON.vpStart;
@@ -349,6 +351,12 @@ const HUD = (() => {
     for (const z of [0, 1.5, 3, 4.5, 6]) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .3); if (h && FOG.explored(G, 0, h.x, h.y)) return h; }
     return null;
   }
+  /* an abandoned gun or dropped weapon under the cursor */
+  function dropAt(sx, sy) {
+    let best = null, bd = (ui.touch ? 40 : 26) ** 2;
+    for (const d of G.drops || []) { if (!FOG.explored(G, 0, d.x, d.y)) continue; const [x, y] = RENDER.toScreen(d.x, d.y, .5); const q = (x - sx) ** 2 + (y - sy) ** 2; if (q < bd) { bd = q; best = d; } }
+    return best;
+  }
   function entAt(sx, sy) {
     let best = null, bd = ui.touch ? 46 * 46 : 30 * 30;
     for (const e of G.ents) {
@@ -484,6 +492,12 @@ const HUD = (() => {
     if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
       const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
       if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } else SIM.issue(G, builders, { type: 'repair', target: t.id }); return; }
+    }
+    // right-click an abandoned gun or a dropped weapon: the nearest squad that can use it goes for it
+    const dd = !dragged && !t ? dropAt(e.clientX, e.clientY) : null;
+    if (dd) {
+      const can = sel.filter(s => SIM.canPickUp(s)).sort((a, b) => U.dist2(a.x, a.y, dd.x, dd.y) - U.dist2(b.x, b.y, dd.x, dd.y));
+      if (can.length) { SIM.issue(G, [can[0].id], { type: 'pickup', drop: dd.id }); marker(dd.x, dd.y, '#ffe27a'); return; }
     }
     // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
     const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
@@ -626,14 +640,16 @@ const HUD = (() => {
       else if (m.type === 'face') { const e = G.byId.get(m.ids[0]); if (e) ui.ghost = { kind: 'face', x: e.x, y: e.y, a: Math.atan2(wy - e.y, wx - e.x) }; }
     }
     if (mouse.rdown && Math.hypot(mouse.x - mouse.rdown.x, mouse.y - mouse.rdown.y) > 12) { const [sx, sy] = RENDER.toWorld(mouse.rdown.x, mouse.rdown.y); ui.ghost = { kind: 'face', x: sx, y: sy, a: Math.atan2(wy - sy, wx - sx) }; }
-    if (!m && !t && mouse.inCanvas && selEnts().some(s => s.owner === 0 && s.type === 'squad')) {
+    const hd = mouse.inCanvas && !m && !t ? dropAt(mouse.x, mouse.y) : null; ui.hoverDrop = hd ? hd.id : null;
+    if (hd && selEnts().some(s => s.owner === 0 && SIM.canPickUp(s))) ui.ghost = { kind: 'label', x: hd.x, y: hd.y, z: 3, label: hd.kind === 'team' ? (hd.side !== G.players[0].side ? 'Capture ' : 'Recrew ') + D.SQUADS[hd.defId].name.replace(' Team', '') : 'Pick up ' + D.W[hd.weapon].name };
+    else if (!m && !t && mouse.inCanvas && selEnts().some(s => s.owner === 0 && s.type === 'squad')) {
       const hb = houseAtScreen(mouse.x, mouse.y);
       if (hb) { const o = hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = { kind: 'house', h: hb, ok: !o || o.owner === 0, label: !o ? 'Garrison' : o.owner === 0 ? 'Occupied' : 'Enemy inside' }; }
     }
     // cover preview dots where the selection would stand (white none, yellow light, green heavy, red negative)
     ui.coverPreview = null;
     const sel = selEnts().filter(s => s.owner === 0 && s.type === 'squad');
-    if (sel.length === 1 && mouse.inCanvas && !m && !t && !(ui.ghost && ui.ghost.kind === 'house')) {
+    if (sel.length === 1 && mouse.inCanvas && !m && !t && !(ui.ghost && (ui.ghost.kind === 'house' || ui.ghost.kind === 'label'))) {
       const s = sel[0];
       let face = SIM.threatDir(G, s, wx, wy); if (face == null) face = Math.atan2(wy - s.y, wx - s.x);
       const out = SIM.standPlan(G, s, wx, wy, face).map(p2 => ({ x: p2.x, y: p2.y, cover: p2.cover === 'garrison' ? 'heavy' : p2.cover }));

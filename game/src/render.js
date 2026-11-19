@@ -282,6 +282,7 @@ const RENDER = (() => {
     for (const h of G.map.houses) if (!h.dead && vis(h.x, h.y, 260)) list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
     for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) });
     for (const w of G.wrecks || []) if (vis(w.x, w.y, 200)) list.push({ d: w.x + w.y, f: () => drawWreck(G, c, w, k) });
+    for (const d of G.drops || []) if (vis(d.x, d.y, 120) && FOG.explored(G, me, d.x, d.y)) list.push({ d: d.x + d.y, f: () => drawDrop(G, c, d, k, ui) });
     if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
     const shadows = [];
     for (const e of G.ents) {
@@ -499,7 +500,7 @@ const RENDER = (() => {
     if (sq.crew) {
       const cw = sq.def.crewWeapon;
       if (deployed) {
-        const key = side + '_' + cw, deg = sq.crew.heading * 180 / Math.PI, fireAge = G.t - (sq.cwFireT || -9);
+        const key = (sq.weaponSide || side) + '_' + cw, deg = sq.crew.heading * 180 / Math.PI, fireAge = G.t - (sq.cwFireT || -9);
         const clip = fireAge < .5 && R.lib[key] && R.lib[key].m.clips.fire ? 'fire' : 'idle';
         const fr = clip === 'fire' ? Math.min(R.lib[key].m.clips.fire.frames - 1, Math.floor(fireAge * R.lib[key].m.clips.fire.fps)) : 0;
         const [sx, sy] = toScreen(sq.crew.x, sq.crew.y);
@@ -508,7 +509,7 @@ const RENDER = (() => {
       } else if (sq.def.towed && alive.length) {
         // limbered gun pushed by the first two men
         const a = alive[0], b2 = alive[1] || alive[0], mx = (a.x + b2.x) / 2, my = (a.y + b2.y) / 2, h = sq.heading;
-        const gx = mx + Math.cos(h) * 2.4, gy = my + Math.sin(h) * 2.4, key = side + '_' + cw + '_limbered', deg = h * 180 / Math.PI;
+        const gx = mx + Math.cos(h) * 2.4, gy = my + Math.sin(h) * 2.4, key = (sq.weaponSide || side) + '_' + cw + '_limbered', deg = h * 180 / Math.PI;
         const mem = memOf(sq); mem.gd = (mem.gd || 0) + Math.hypot(gx - (mem.gx || gx), gy - (mem.gy || gy)); mem.gx = gx; mem.gy = gy;
         const lib = R.lib[key], fr = lib ? ArtKit.frameOf(lib.m, sq.moving ? 'move' : 'idle', G.t, mem.gd * PXM * k, k) : 0;
         const [sx, sy] = toScreen(gx, gy);
@@ -567,6 +568,19 @@ const RENDER = (() => {
       const tt = ((G.t * .35 + i * .25) % 1), [px, py] = toScreen(w.x + tt * 2, w.y - tt, 1.5 + tt * 7);
       c.fillStyle = `rgba(50,48,44,${.35 * (1 - tt) * (1 - age / 60)})`; c.beginPath(); c.arc(px, py, (8 + tt * 26) * k, 0, U.TAU); c.fill();
     }
+  }
+  /* an abandoned team weapon (its own sprite, unmanned) or a dropped special weapon (a small marker) */
+  function drawDrop(G, c, d, k, ui) {
+    const [sx, sy] = toScreen(d.x, d.y), hov = ui && ui.hoverDrop === d.id;
+    if (d.kind === 'team') {
+      const key = d.side + '_' + DATA.SQUADS[d.defId].crewWeapon;
+      if (R.lib[key]) { ArtKit.drawUnitShadow(c, R.lib, key, { clip: 'idle', frame: 0, heading: d.heading * 180 / Math.PI }, sx, sy, k); ArtKit.drawUnit(c, R.lib, key, { clip: 'idle', frame: 0, heading: d.heading * 180 / Math.PI }, sx, sy, k); }
+    } else {
+      c.save(); c.translate(sx, sy); c.rotate(-.5); c.fillStyle = '#2d2a24'; c.fillRect(-11 * k, -1.5 * k, 22 * k, 3 * k); c.fillStyle = '#6b4f2e'; c.fillRect(-11 * k, -1.5 * k, 7 * k, 3 * k); c.restore();
+    }
+    // a pale ring so it reads as something to pick up
+    c.strokeStyle = hov ? 'rgba(255,230,120,.95)' : 'rgba(230,220,180,.55)'; c.lineWidth = (hov ? 2 : 1.2) * k; c.setLineDash([4 * k, 3 * k]);
+    c.beginPath(); c.ellipse(sx, sy, (d.kind === 'team' ? 26 : 14) * k, (d.kind === 'team' ? 13 : 7) * k, 0, 0, U.TAU); c.stroke(); c.setLineDash([]);
   }
   function drawCorpse(G, c, cp, k) {
     const key = cp.side + '_' + cp.sprite, lib = R.lib[key];
@@ -750,6 +764,8 @@ const RENDER = (() => {
       const [sx, sy] = toScreen(g.x, g.y); c.strokeStyle = g.err ? '#f66' : '#ffcf4a'; c.lineWidth = 2;
       c.beginPath(); c.ellipse(sx, sy, (g.r || 4) * 31 * k, (g.r || 4) * 15.5 * k, 0, 0, U.TAU); c.stroke();
       if (g.err) { c.fillStyle = '#fbb'; c.font = '600 13px Inter'; c.fillText(g.err, sx + 10, sy - 10); }
+    } else if (g.kind === 'label') {
+      const [lx, ly] = toScreen(g.x, g.y, g.z || 2); c.font = '700 13px Inter, system-ui'; c.textAlign = 'center'; const tw = c.measureText(g.label).width; c.fillStyle = 'rgba(0,0,0,.7)'; c.fillRect(lx - tw / 2 - 6, ly - 13, tw + 12, 19); c.fillStyle = '#ffe9a8'; c.fillText(g.label, lx, ly + 1); c.textAlign = 'left';
     } else if (g.kind === 'house') {
       const h = g.h; c.strokeStyle = g.ok ? '#6f6' : '#f66'; c.lineWidth = 2; c.fillStyle = g.ok ? 'rgba(90,220,140,.18)' : 'rgba(255,80,60,.18)';
       c.beginPath(); [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b], i) => { const [sx, sy] = toScreen(h.x + a * (h.w / 2 + .4), h.y + b * (h.d / 2 + .4)); i ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }); c.closePath(); c.fill(); c.stroke();

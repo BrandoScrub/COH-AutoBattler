@@ -349,6 +349,8 @@ const COMBAT = (() => {
         if (Math.abs(e.x - x) < e.w / 2 + radius && Math.abs(e.y - y) < e.d / 2 + radius) damageBuilding(G, e, dmg * .5, src);
       }
     }
+    // dropped weapons and abandoned guns can be wrecked
+    for (const d of G.drops || []) if (U.dist2(d.x, d.y, x, y) < radius * radius) d.hp -= dmg * .5;
     // houses take blast damage (half the blast; small arms never hurt them), and collapse at zero
     for (const h of G.map.houses) if (!h.dead && Math.abs(h.x - x) < h.w / 2 + radius && Math.abs(h.y - y) < h.d / 2 + radius) SIM.damageHouse(G, h, dmg * .5, src);
     // cover objects take blast damage
@@ -379,6 +381,7 @@ const COMBAT = (() => {
       m.alive = false; m.deadT = G.t;
       (G.corpses = G.corpses || []).push({ x: m.x, y: m.y, heading: m.heading, sprite: m.sprite, side: G.players[sq.owner].side, t0: G.t, id: G.rng() * 1000 | 0 });
       sq.slots = null;
+      SIM.onModelDeath(G, sq, m);
       if (!sq.models.some(q => q.alive)) { SIM.event(G, sq.owner, 'lost', sq.def.name + ' lost', sq.x, sq.y); if (src) xpFor(G, src, sq, sq.def.hp); }
     }
   }

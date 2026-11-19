@@ -197,6 +197,7 @@ const SIM = (() => {
     if (e.type === 'squad' && e.garrison != null && o.type === 'ability' && o.id === 'barrage') leaveHouse(G, e, o.x, o.y);
     switch (o.type) {
       case 'garrison': if (canGarrison(e)) orderGarrison(G, e, G.map.houses[o.house]); break;
+      case 'pickup': orderPickup(G, e, dropById(G, o.drop)); break;
       case 'unload': if (e.type === 'squad' && e.garrison != null) { leaveHouse(G, e, o.x, o.y); e.order = { type: 'idle' }; } break;
       case 'stop': e.order = { type: 'idle' }; e.path = null; e.target = null; e.retreating = false; e.forceTarget = null; e.autoRev = false; e.faceTo = null; break;
       case 'move': case 'attackMove': case 'reverse':
@@ -525,6 +526,68 @@ const SIM = (() => {
     event(G, occ.owner, 'lost', occ.def.name + ' breached and forced out!', h.x, h.y);
     e.order = { type: 'idle' };
     enterHouse(G, e, h);
+  }
+
+
+  /* ---------------- dropped weapons and abandoned team weapons (CoH3) ----------------
+     A team weapon whose crew is wiped out stays on the field, and any infantry squad (either side) can crew it:
+     up to a full crew walks over from the squad and becomes a new team of that weapon; the rest stay as they were.
+     Special small arms (BAR, MG 42 LMG, bazooka, Panzerschreck) can drop when their carrier dies; a squad picks one
+     up by swapping it for a man's rifle (two picked-up weapons a squad at most). Blasts can wreck what lies there. */
+  const DROPS = { chance: .55, life: 180, hp: 120, reach: 2, perSquad: 2,
+    weapons: { bar: 'lmg', mg42lmg: 'lmg', bazooka: 'rocket_gunner', schreck: 'rocket_gunner' } };
+  function dropWeapon(G, kind, props) { (G.drops = G.drops || []).push({ id: G.nextDrop = (G.nextDrop || 0) + 1, kind, t: G.t, hp: DROPS.hp, ...props }); }
+  function onModelDeath(G, sq, m) {
+    if (m.weapon && DROPS.weapons[m.weapon] && G.rng() < DROPS.chance) dropWeapon(G, 'weapon', { weapon: m.weapon, x: m.x + G.rng.range(-.4, .4), y: m.y + G.rng.range(-.4, .4), side: sq.weaponSide || G.players[sq.owner].side });
+    if (sq.def.crewWeapon && !sq.models.some(q => q.alive)) {
+      const c = sq.crew, deployed = c && c.state !== 'packed';
+      dropWeapon(G, 'team', { defId: sq.defId, x: deployed ? c.x : sq.x, y: deployed ? c.y : sq.y, heading: c ? c.heading : sq.heading, side: sq.weaponSide || G.players[sq.owner].side });
+    }
+  }
+  const dropById = (G, id) => (G.drops || []).find(d => d.id === id);
+  function canPickUp(sq) { return sq.type === 'squad' && !sq.def.crewWeapon && sq.def.models.length > 1 && !sq.retreating; }
+  function orderPickup(G, sq, d) {
+    if (!d || !canPickUp(sq)) return;
+    if (d.kind === 'weapon' && (sq.picked || 0) >= DROPS.perSquad) { event(G, sq.owner, 'error', 'This squad already carries two picked-up weapons', sq.x, sq.y); return; }
+    if (sq.garrison != null) leaveHouse(G, sq, d.x, d.y);
+    sq.order = { type: 'pickup', drop: d.id }; sq.forceTarget = null; sq.slots = null; sq.buildQueue = [];
+    setPath(G, sq, d.x, d.y);
+  }
+  function stepPickup(G, sq) {
+    const d = dropById(G, sq.order.drop);
+    if (!d) { sq.order = { type: 'idle' }; return; }
+    const al = sq.models.filter(m => m.alive); if (!al.length) return;
+    const near = al.some(m => Math.hypot(m.x - d.x, m.y - d.y) < DROPS.reach) || Math.hypot(sq.x - d.x, sq.y - d.y) < DROPS.reach;
+    if (!near) { if (!sq.path || !sq.path.length) setPath(G, sq, d.x, d.y); return; }
+    G.drops.splice(G.drops.indexOf(d), 1);
+    sq.order = { type: 'idle' }; sq.path = null;
+    if (d.kind === 'weapon') {
+      // the man nearest the weapon drops his rifle for it (never the leader, never a man already carrying a special weapon)
+      const cands = al.filter((m, i) => m !== sq.models[0] && !DROPS.weapons[m.weapon] && !(m.weapon && D.W[m.weapon].kind === 'flame'));
+      const m = (cands.length ? cands : al.slice(1)).sort((a, b) => U.dist2(a.x, a.y, d.x, d.y) - U.dist2(b.x, b.y, d.x, d.y))[0];
+      if (!m) return;
+      m.weapon = d.weapon; m.sprite = DROPS.weapons[d.weapon]; m.cd = 1; sq.picked = (sq.picked || 0) + 1;
+      event(G, sq.owner, 'captured', sq.def.name + ' picked up a ' + D.W[d.weapon].name, d.x, d.y);
+      return;
+    }
+    // a team weapon: up to a full crew leaves this squad and becomes a new team of it
+    const tDef = D.SQUADS[d.defId], need = tDef.models.length, crewMen = al.slice(-need);
+    const team = spawnSquad(G, d.defId, sq.owner, d.x, d.y);
+    team.weaponSide = d.side; team.heading = d.heading;
+    team.models.forEach((tm, i) => {
+      const from = crewMen[i];
+      if (!from) { tm.alive = false; return; }
+      tm.x = from.x; tm.y = from.y; tm.hp = Math.min(tm.maxHp, from.hp);
+      from.alive = false; from.left = true;   // walked over to the gun: not a casualty
+    });
+    team.crew.state = 'deployed'; team.crew.x = d.x; team.crew.y = d.y; team.crew.heading = d.heading; team.x = d.x; team.y = d.y;
+    (G.became = G.became || {})[sq.id] = team.id; sq.slots = null;
+    popRecount(G);
+    event(G, sq.owner, 'captured', (d.side !== G.players[sq.owner].side ? 'Captured ' : 'Recrewed ') + tDef.name.replace(' Team', ''), d.x, d.y);
+  }
+  function stepDrops(G) {
+    if (!G.drops || !G.drops.length) return;
+    G.drops = G.drops.filter(d => d.hp > 0 && (d.kind === 'team' || G.t - d.t < DROPS.life));
   }
 
   /* ---------------- movement ---------------- */
@@ -892,6 +955,7 @@ const SIM = (() => {
         else e.building = false;
         if (e.order.type === 'ability') stepAbility(G, e, dt);
         if (e.order.type === 'garrison') stepGarrisonOrder(G, e);
+        if (e.order.type === 'pickup') stepPickup(G, e);
         if (e.garrison != null) stepGarrisoned(G, e, dt); else stepSquadMove(G, e, dt);
         stepSquadSupport(G, e, dt);
       } else if (e.type === 'vehicle') {
@@ -899,6 +963,7 @@ const SIM = (() => {
       }
     }
     COMBAT.step(G, dt);
+    stepDrops(G);
     stepBuildings(G, dt);
     stepCapture(G, dt);
     stepEconomy(G, dt);
@@ -927,7 +992,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, standPlan, threatDir, damageHouse, houseOf, GARRISON, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, canCapture, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
