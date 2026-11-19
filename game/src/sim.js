@@ -146,11 +146,11 @@ const SIM = (() => {
       // spread a group round the click so squads don't stack
       const n = ents.length, offs = formationOffsets(n, null);
       const cx = ents.reduce((a, e) => a + e.x, 0) / (n || 1), cy = ents.reduce((a, e) => a + e.y, 0) / (n || 1);
-      const ang = Math.atan2(o.y - cy, o.x - cx);
+      const explicit = o.face != null, ang = explicit ? o.face : Math.atan2(o.y - cy, o.x - cx);
       ents.forEach((e, i) => {
         const of = offs[i], sp = e.type === 'vehicle' ? 3.2 : 4.2;
         const tx = o.x + (Math.cos(ang) * of.f - Math.sin(ang) * of.s) * sp, ty = o.y + (Math.sin(ang) * of.f + Math.cos(ang) * of.s) * sp;
-        orderEnt(G, e, { ...o, x: n > 1 ? tx : o.x, y: n > 1 ? ty : o.y, face: ang }, queue);
+        orderEnt(G, e, { ...o, x: n > 1 ? tx : o.x, y: n > 1 ? ty : o.y, face: explicit ? ang : Math.atan2((n > 1 ? ty : o.y) - e.y, (n > 1 ? tx : o.x) - e.x), faceSet: explicit }, queue);
       });
       return;
     }
@@ -177,7 +177,7 @@ const SIM = (() => {
         // a team weapon told to go where it already stands just turns to face the new way
         if (e.crew && e.crew.state !== 'packed' && Math.hypot(o.x - e.crew.x, o.y - e.crew.y) < 3) { if (o.face != null && Math.abs(U.angNorm(o.face - e.crew.heading)) > .3) setup(G, e, o.face); return; }
         e.retreating = false; e.forceTarget = null;
-        e.order = { type: o.type, x: o.x, y: o.y, face: o.face };
+        e.order = { type: o.type, x: o.x, y: o.y, face: o.face, faceSet: o.faceSet };
         setPath(G, e, o.x, o.y);
         if (e.crew && e.crew.state !== 'packed') teardown(G, e);
         if (e.type === 'squad') e.slots = null;
@@ -413,7 +413,11 @@ const SIM = (() => {
       else if (slotsFor && slotsFor[k]) {
         if (!MAP.walkable(nav, G.map, slotsFor[k].x, slotsFor[k].y)) { const o = MAP.nearestOpen(nav, G.map, slotsFor[k].x, slotsFor[k].y); slotsFor[k].x = o.x; slotsFor[k].y = o.y; }
         tx = slotsFor[k].x; ty = slotsFor[k].y;
+        // a spot round a wall or hedge: walk round it on a short path instead of pressing into it
+        if (m.goalX !== tx || m.goalY !== ty) { m.goalX = tx; m.goalY = ty; m.spath = MAP.lineClear(nav, G.map, m.x, m.y, tx, ty) ? null : MAP.findPath(G.map, m.x, m.y, tx, ty, false); }
+        if (m.spath && m.spath.length) { if (Math.hypot(m.spath[0].x - m.x, m.spath[0].y - m.y) < .35) m.spath.shift(); if (m.spath.length) { tx = m.spath[0].x; ty = m.spath[0].y; } }
       } else {
+        m.spath = null; m.goalX = null;
         const o = sq.offsets[m.i % sq.offsets.length], h = sq.heading;
         tx = sq.x + Math.cos(h) * o.f - Math.sin(h) * o.s + m.jx; ty = sq.y + Math.sin(h) * o.f + Math.cos(h) * o.s + m.jy;
         if (!MAP.walkable(nav, G.map, tx, ty) || !MAP.lineClear(nav, G.map, m.x, m.y, tx, ty)) {
@@ -430,7 +434,7 @@ const SIM = (() => {
         if (MAP.walkable(nav, G.map, nx, ny) || !MAP.walkable(nav, G.map, m.x, m.y)) { m.x = nx; m.y = ny; }
         else { m.x = U.lerp(m.x, sq.x, .2); m.y = U.lerp(m.y, sq.y, .2); }
         if (step > .01) m.heading = Math.atan2(dy, dx);
-      }
+      } else if (slotsFor && sq.holdFace != null) m.heading = U.turnTo(m.heading, sq.holdFace, 4 * dt);   // in place: face the way the line faces
       m.vx = step / dt;
       // safety net: a man left inside an obstacle (a building raised on him, a wall built through him) steps out
       if (!MAP.walkable(nav, G.map, m.x, m.y) && !(sq.crew && sq.crew.state !== 'packed')) { m.blockT = (m.blockT || 0) + dt; if (m.blockT > 2) { const o = MAP.nearestOpen(nav, G.map, m.x, m.y); m.x = o.x; m.y = o.y; m.blockT = 0; sq.slots = null; } } else m.blockT = 0;
@@ -446,37 +450,83 @@ const SIM = (() => {
   }
   function arrive(G, sq) {
     const o = sq.order;
-    if (sq.queue && sq.queue.length) { const n = sq.queue.shift(); sq.order = { type: n.type, x: n.x, y: n.y, face: n.face }; setPath(G, sq, n.x, n.y); return; }
+    if (sq.queue && sq.queue.length) { const n = sq.queue.shift(); sq.order = { type: n.type, x: n.x, y: n.y, face: n.face, faceSet: n.faceSet }; setPath(G, sq, n.x, n.y); return; }
     if (o.type === 'move' || o.type === 'attackMove') {
+      sq.face = o.face != null ? o.face : sq.heading; sq.faceSet = !!o.faceSet;
       sq.order = { type: 'idle' };
       if (sq.crew && sq.crew.state === 'packed') setup(G, sq, o.face != null ? o.face : sq.heading);
     }
-    if (o.type === 'retreat') { sq.order = { type: 'idle' }; sq.retreating = false; sq.supp = 0; sq.suppState = 0; }
+    if (o.type === 'retreat') { sq.face = sq.heading; sq.faceSet = false; sq.order = { type: 'idle' }; sq.retreating = false; sq.supp = 0; sq.suppState = 0; }
     sq.slots = null;
   }
-  /* where each man stands when the squad stops: behind any cover within reach that faces the way it was going */
-  function holdSlots(G, sq) {
-    const alive = sq.models.filter(m => m.alive), n = alive.length, out = [];
-    const fx = Math.cos(sq.heading), fy = Math.sin(sq.heading);
-    const cands = [];
-    for (const c of MAP.coversNear(G.map, sq.x, sq.y)) {
-      if (!c.alive || !c.cover) continue;
-      const L = Math.hypot(c.bx - c.ax, c.by - c.ay), nx = -(c.by - c.ay) / L, ny = (c.bx - c.ax) / L;
-      const side = (nx * fx + ny * fy) > 0 ? -1 : 1;     // stand on the side away from where we face
-      const cnt = Math.max(1, Math.floor(L / 1.4));
+  /* ---------------- where each man stands when the squad stops ----------------
+     CoH3 behaviour: the squad keeps a loose fire line across the way it faces, and a man drops into cover only when a
+     piece of it is close to his own spot in that line and actually shields him from the threat. So clicking open
+     ground gives a spread line there, clicking by a wall puts the men along the wall, and nobody runs off to cover
+     several metres away. Used both when the squad arrives and for the move preview dots, so the preview is the truth.
+     face: the angle the squad will face. Returns one {x, y, cover} per living man, in model order. */
+  const STAND = { spacing: 1.7, stagger: .9, reach: 2.8, radius: 5.2, coverStep: 1.25, behind: .85, light: .9 };
+  function threatDir(G, sq, x, y) {
+    let best = null, bd = 42 * 42;
+    for (const e of G.ents) {
+      if (e.dead || e.type === 'building' || !enemyOf(G, e.owner, sq.owner) || !FOG.visible(G, sq.owner, e)) continue;
+      const d = U.dist2(e.x, e.y, x, y); if (d < bd) { bd = d; best = e; }
+    }
+    return best ? Math.atan2(best.y - y, best.x - x) : null;
+  }
+  function standPlan(G, sq, ax, ay, face) {
+    const alive = sq.models.filter(m => m.alive), n = alive.length, nav = MAP.navGrids(G.map).inf, S = STAND;
+    const fx = Math.cos(face), fy = Math.sin(face), rx = -fy, ry = fx;
+    // the line: men side by side across the facing, every other one half a step back, the leader (man 0) centre-back
+    const order = [];
+    for (let i = 0; i < n; i++) order.push(i === 0 ? 0 : i % 2 ? (i + 1) / 2 : -i / 2);
+    const slots = alive.map((m, k) => {
+      const lat = order[k] * S.spacing + (m.jx || 0) * .5, fwd = (k === 0 ? -S.stagger : (k % 2 ? 0 : -S.stagger * .6)) + (m.jy || 0) * .4;
+      return { x: ax + rx * lat + fx * fwd, y: ay + ry * lat + fy * fwd };
+    });
+    // cover spots: along finished cover near the anchor, on the side away from the threat, only where the cover runs
+    // across the line of fire (a wall pointing at the enemy shields nobody)
+    const spots = [], seen = new Set();
+    for (const bx of [-1, 0, 1]) for (const by of [-1, 0, 1]) for (const c of MAP.coversNear(G.map, ax + bx * 8, ay + by * 8)) {
+      if (seen.has(c) || !c.alive || !c.cover || c.cover === 'negative' || (c.built != null && c.built < 1)) continue; seen.add(c);
+      if (U.segDist2(ax, ay, c.ax, c.ay, c.bx, c.by) > (S.radius + 1) ** 2) continue;
+      const L = Math.hypot(c.bx - c.ax, c.by - c.ay); if (L < .3) continue;
+      const nx = -(c.by - c.ay) / L, ny = (c.bx - c.ax) / L, facing = nx * fx + ny * fy;
+      if (Math.abs(facing) < .35) continue;
+      const side = facing > 0 ? -1 : 1, cnt = Math.max(1, Math.round(L / S.coverStep));
       for (let i = 0; i < cnt; i++) {
-        const t = (i + .5) / cnt, px = c.ax + (c.bx - c.ax) * t + nx * side * .9, py = c.ay + (c.by - c.ay) * t + ny * side * .9;
-        const d = Math.hypot(px - sq.x, py - sq.y);
-        if (d < 9 && MAP.walkable(MAP.navGrids(G.map).inf, G.map, px, py)) cands.push({ x: px, y: py, d: d + (c.cover === 'heavy' ? 0 : 3) });
+        const t = (i + .5) / cnt, px = c.ax + (c.bx - c.ax) * t + nx * side * S.behind, py = c.ay + (c.by - c.ay) * t + ny * side * S.behind;
+        if (Math.hypot(px - ax, py - ay) > S.radius || !MAP.walkable(nav, G.map, px, py)) continue;
+        spots.push({ x: px, y: py, cover: c.cover, w: c.cover === 'heavy' ? 0 : S.light, used: false });
       }
     }
-    cands.sort((a, b) => a.d - b.d);
-    for (let i = 0; i < n; i++) {
-      if (cands[i] && i < cands.length) { out.push(cands[i]); continue; }
-      const o = sq.offsets[i % sq.offsets.length], nav = MAP.navGrids(G.map).inf;
-      out.push(MAP.nearestOpen(nav, G.map, sq.x + fx * o.f * .8 - fy * o.s, sq.y + fy * o.f * .8 + fx * o.s));
+    // pair men with spots, cheapest first; a man only takes a spot within reach of his place in the line
+    const pairs = [];
+    slots.forEach((sl, k) => spots.forEach((sp, j) => { const d = Math.hypot(sp.x - sl.x, sp.y - sl.y); if (d <= S.reach) pairs.push({ k, j, c: d + sp.w }); }));
+    pairs.sort((a, b) => a.c - b.c);
+    const out = new Array(n).fill(null);
+    for (const p of pairs) { if (out[p.k] || spots[p.j].used) continue; const sp = spots[p.j]; if (out.some(o => o && Math.hypot(o.x - sp.x, o.y - sp.y) < 1.05)) continue; sp.used = true; out[p.k] = { x: sp.x, y: sp.y, cover: sp.cover }; }
+    // men left in the open close up on the ones in cover (a step behind them) so the squad stays together
+    const inCover = out.filter(Boolean);
+    let cx = 0, cy = 0; if (inCover.length) { for (const o of inCover) { cx += o.x; cy += o.y; } cx /= inCover.length; cy /= inCover.length; }
+    for (let k = 0; k < n; k++) {
+      if (out[k]) continue;
+      let x = slots[k].x, y = slots[k].y;
+      if (inCover.length * 2 >= n) { x += (cx - ax) * .5 - fx * 1.2; y += (cy - ay) * .5 - fy * 1.2; }
+      if (!MAP.walkable(nav, G.map, x, y)) { const o = MAP.nearestOpen(nav, G.map, x, y); x = o.x; y = o.y; }
+      // do not stand on top of someone: slide sideways along the line
+      for (let tries = 0; tries < 6 && out.some(o => o && Math.hypot(o.x - x, o.y - y) < 1.05); tries++) { const sgn = tries % 2 ? -1 : 1; x += rx * sgn * (tries + 1) * .6; y += ry * sgn * (tries + 1) * .6; if (!MAP.walkable(nav, G.map, x, y)) { const o = MAP.nearestOpen(nav, G.map, x, y); x = o.x; y = o.y; } }
+      out[k] = { x, y, cover: MAP.coverAt(G.map, x, y, x + fx * 10, y + fy * 10) };
     }
     return out;
+  }
+  function holdSlots(G, sq) {
+    // face: the way the player dragged, else the nearest enemy in sight, else the way the squad was walking
+    let face = sq.faceSet ? sq.face : null;
+    if (face == null) face = threatDir(G, sq, sq.x, sq.y);
+    if (face == null) face = sq.face != null ? sq.face : sq.heading;
+    sq.holdFace = face;
+    return standPlan(G, sq, sq.x, sq.y, face);
   }
   /* crew positions round a deployed weapon (from art/crew_layout.json, artkit units -> metres) */
   function crewSlot(G, sq, k) {
@@ -694,7 +744,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, standPlan, threatDir, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, canCapture, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;

@@ -584,13 +584,9 @@ const HUD = (() => {
     ui.coverPreview = null;
     const sel = selEnts().filter(s => s.owner === 0 && s.type === 'squad');
     if (sel.length === 1 && mouse.inCanvas && !m && !t) {
-      const s = sel[0], n = s.models.filter(q => q.alive).length, out = [];
-      const fx = wx - s.x, fy = wy - s.y, L = Math.hypot(fx, fy) || 1, hx = fx / L, hy = fy / L;
-      const tmp = { x: wx, y: wy, heading: Math.atan2(hy, hx), models: s.models, offsets: s.offsets };
-      const cands = [];
-      for (const cv of MAP.coversNear(G.map, wx, wy)) { if (!cv.alive || !cv.cover) continue; const CL = Math.hypot(cv.bx - cv.ax, cv.by - cv.ay), nx = -(cv.by - cv.ay) / CL, ny = (cv.bx - cv.ax) / CL, sd = (nx * hx + ny * hy) > 0 ? -1 : 1; const cnt = Math.max(1, Math.floor(CL / 1.4)); for (let i = 0; i < cnt; i++) { const tt = (i + .5) / cnt, px = cv.ax + (cv.bx - cv.ax) * tt + nx * sd * .9, py = cv.ay + (cv.by - cv.ay) * tt + ny * sd * .9; if (Math.hypot(px - wx, py - wy) < 9) cands.push({ x: px, y: py, d: Math.hypot(px - wx, py - wy) }); } }
-      cands.sort((a, b) => a.d - b.d);
-      for (let i = 0; i < n; i++) { let p2 = cands[i]; if (!p2) { const o = s.offsets[i % s.offsets.length]; p2 = { x: wx + hx * o.f * .8 - hy * o.s, y: wy + hy * o.f * .8 + hx * o.s }; } const cov = MAP.coverAt(G.map, p2.x, p2.y, p2.x + hx * 10, p2.y + hy * 10); out.push({ x: p2.x, y: p2.y, cover: cov === 'garrison' ? 'heavy' : cov }); }
+      const s = sel[0];
+      let face = SIM.threatDir(G, s, wx, wy); if (face == null) face = Math.atan2(wy - s.y, wx - s.x);
+      const out = SIM.standPlan(G, s, wx, wy, face).map(p2 => ({ x: p2.x, y: p2.y, cover: p2.cover === 'garrison' ? 'heavy' : p2.cover }));
       ui.coverPreview = out;
     }
     // cursor
