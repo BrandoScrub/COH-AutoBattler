@@ -617,6 +617,11 @@ const SIM = (() => {
     G.drops = G.drops.filter(d => d.hp > 0 && (d.kind === 'team' || G.t - d.t < DROPS.life));
   }
 
+  const VAULT = { time: .6, slow: .5, kinds: new Set(['wall', 'hedge', 'sandbags', 'rubble', 'tanktrap', 'wreck']) };
+  function crossesLow(G, ax, ay, bx, by) {
+    for (const c of MAP.coversNear(G.map, ax, ay)) if (c.alive && VAULT.kinds.has(c.kind) && !(c.built < 1) && !c.blocksI && U.segX(ax, ay, bx, by, c.ax, c.ay, c.bx, c.by)) return true;
+    return false;
+  }
   /* ---------------- movement ---------------- */
   function isPinned(sq) { return sq.suppState === 2 && !sq.retreating; }
   function squadSpeed(sq) {
@@ -676,7 +681,10 @@ const SIM = (() => {
         }
       }
       const dx = tx - m.x, dy = ty - m.y, d = Math.hypot(dx, dy);
-      const step = Math.min(d, speed * dt * (d > 6 ? 1.3 : 1));
+      let step = Math.min(d, speed * dt * (d > 6 ? 1.3 : 1));
+      // CoH3 auto-vault: a man crossing a low wall, hedge, sandbag line, rubble or tank trap hops it and is slowed for a moment
+      if (m.vaultT > 0) { m.vaultT = Math.max(0, m.vaultT - dt); step *= VAULT.slow; }
+      else if (step > .01 && d > .05) { const nx2 = m.x + dx / d * (step + .3), ny2 = m.y + dy / d * (step + .3); if (crossesLow(G, m.x, m.y, nx2, ny2)) { m.vaultT = VAULT.time; step *= VAULT.slow; } }
       if (d > .05) {
         const nx = m.x + dx / d * step, ny = m.y + dy / d * step;
         if (MAP.walkable(nav, G.map, nx, ny) || !MAP.walkable(nav, G.map, m.x, m.y)) { m.x = nx; m.y = ny; }

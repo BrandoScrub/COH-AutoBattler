@@ -524,7 +524,8 @@ const RENDER = (() => {
         const slot = SIM.crewSlot(G, sq, idx); crewUnit = slot.unit; rel = slot.rel;
         key = crewUnit ? crewUnit : side + '_rifleman';
       } else if (sq.crew && sq.def.towed && idx < 2) key = side + '_pusher';
-      const [sx, sy] = toScreen(m.x, m.y);
+      const hop = m.vaultT > 0 ? Math.sin(Math.PI * (1 - m.vaultT / .6)) * .7 : 0;   // the vault: a short hop
+      const [sx, sy] = toScreen(m.x, m.y, hop);
       const lib = R.lib[key]; if (!lib) return;
       const mem = memOf(m);
       const full = FULL.has(key.slice(3));
