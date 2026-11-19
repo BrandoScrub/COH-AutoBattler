@@ -2,7 +2,15 @@
 
 A Company of Heroes style tactical RTS, American against German, 1944. This repository holds the game's units so
 far: 70 animated units (vehicles, crew weapons and infantry, both sides), modelled and exported with the art engine
-artkit (BrandoScrub/Game-Engine-System-Design) by its DESIGN_METHOD.md. No game code yet.
+artkit (BrandoScrub/Game-Engine-System-Design) by its DESIGN_METHOD.md, and a first playable browser build in `game/`:
+1v1 skirmish against the AI with victory points, built to the CoH3 reference in `docs/reference/coh3/`.
+
+## Play
+Serve the repository root (`python3 -m http.server`) and open `game/index.html`, or build a folder for any static host
+with `python3 tools/build_web.py <out>`. Unit numbers come from CoH3 game data (coh3stats.com, patch 3.0.1), in
+`game/src/data.js`; units with no CoH3 counterpart in their slot are marked `standIn`. Player buildings are flat
+stand-ins until they are modelled. Tests: `node game/test/headless.js` (duels), `node game/test/aivsai.js us 20`
+(a whole match, AI against AI), `python3 game/test/flow.py de` (opening through real input in headless Chrome).
 
 ## Layout
 Follows the engine's game layout (the gamekit README, engine PR #3), art side only for now:
@@ -176,4 +184,5 @@ Generated from `art/assets.json` by `python3 tools/list_units.py` (rerun it afte
 - The StuG has no side skirts (they would hide the wheels); the M10 turret top is a dark plate, not a real opening.
 - The pinned `artkit/preview.py` draws a wide top layer (a turret with a long gun) off its hull. The fix is on the engine's
   branch `fix-preview-top-layer`, not merged yet; re-pin after it is. `tools/preview_*.py` here never had the problem.
-- No game data beyond art: no speeds, costs, health or weapon stats in `data/units.json` yet.
+- Game stats live in `game/src/data.js`, not in `data/units.json` (which stays the art roster).
+- No buildings modelled yet (HQ, production buildings, emplacements are drawn as flat stand-ins); battlegroups are structure only.
