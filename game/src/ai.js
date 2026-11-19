@@ -112,11 +112,20 @@ const AI = (() => {
       }
       // grenades at enemies in cover
       if (e.type === 'squad' && e.def.abilities && me.res.mu > 40) {
-        const ab = e.def.abilities.find(a => a !== 'barrage' && a !== 'breach' && (e.cooldowns[a] || 0) < G.t);
+        const ab = e.def.abilities.find(a => a !== 'barrage' && a !== 'breach' && !D.ABILITIES[a].smoke && (e.cooldowns[a] || 0) < G.t);
         if (ab) {
           const A = D.ABILITIES[ab];
           const tgt = visibleEnemies.find(o => o.type === 'squad' && U.dist2(o.x, o.y, e.x, e.y) < (A.range - 2) ** 2 && U.dist2(o.x, o.y, e.x, e.y) > ((A.minRange || 6) + 1) ** 2 && (COMBAT.squadCover(G, o) === 'heavy' || o.def.crewWeapon));
           if (tgt && G.rng() < .5) { const m = tgt.models.find(q => q.alive); SIM.issue(G, [e.id], { type: 'ability', id: ab, x: m.x, y: m.y }); continue; }
+        }
+        // smoke off an enemy machine gun that has us suppressed
+        if (e.def.abilities.includes('smokeGrenade') && e.suppState >= 1 && (e.cooldowns.smokeGrenade || 0) < G.t && me.res.mu >= 30) {
+          const mg = visibleEnemies.find(o => o.type === 'squad' && o.crew && o.crew.state === 'deployed' && SIM.weaponOf(o).kind === 'mg' && U.dist2(o.x, o.y, e.x, e.y) < 24 * 24);
+          if (mg) { SIM.issue(G, [e.id], { type: 'ability', id: 'smokeGrenade', x: mg.crew.x, y: mg.crew.y }); continue; }
+        }
+        if (e.def.abilities.includes('smokeBarrage') && (e.cooldowns.smokeBarrage || 0) < G.t && e.crew && e.crew.state === 'deployed' && me.res.mu >= 40) {
+          const mg = visibleEnemies.find(o => o.type === 'squad' && o.crew && o.crew.state === 'deployed' && SIM.weaponOf(o).kind === 'mg' && units.some(f => f.type === 'squad' && f.suppState === 2 && U.dist2(f.x, f.y, o.x, o.y) < 40 * 40) && U.dist2(o.x, o.y, e.x, e.y) < 85 * 85 && U.dist2(o.x, o.y, e.x, e.y) > 30 * 30);
+          if (mg) { SIM.issue(G, [e.id], { type: 'ability', id: 'smokeBarrage', x: mg.crew.x, y: mg.crew.y }); continue; }
         }
         // breach an enemy garrison close by
         if (e.def.abilities.includes('breach') && (e.cooldowns.breach || 0) < G.t && me.res.mu >= 30) {

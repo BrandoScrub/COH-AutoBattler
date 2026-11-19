@@ -12,6 +12,7 @@ const COMBAT = (() => {
       else if (e.type === 'vehicle') vehicleFire(G, e, dt);
     }
     stepProjectiles(G, dt);
+    stepSmoke(G);
     // tidy effects
     if (G.fx.length > 400) G.fx.splice(0, G.fx.length - 400);
     G.fx = G.fx.filter(f => G.t - f.t < (f.life || 3));
@@ -155,7 +156,7 @@ const COMBAT = (() => {
       }
       if (sq.barrage && c.state === 'deployed') {
         const b = sq.barrage; b.t -= dt;
-        if (b.t <= 0 && b.left > 0) { lobShell(G, sq, c, cw, b.x, b.y, true); b.left--; b.t = 2.2; alive[0].since = 0; fired = true; }
+        if (b.t <= 0 && b.left > 0) { lobShell(G, sq, c, cw, b.x, b.y, true, b.smoke); b.left--; b.t = b.smoke ? 1.2 : 2.2; alive[0].since = 0; fired = true; }
         if (b.left <= 0) sq.barrage = null;
       }
     }
@@ -244,6 +245,7 @@ const COMBAT = (() => {
     const d = Math.hypot(tm.x - from.x, tm.y - from.y);
     G.fx.push({ kind: 'muzzle', x: from.x, y: from.y, t: G.t, big: w.kind === 'cannon' || w.kind === 'at' ? 1 : 0, life: .15 });
     let acc = U.profile(w.acc, w.rng, d) * vb.acc * (moving ? (w.moveAcc || .5) : 1) * (src.suppState === 1 ? .5 : 1);
+    if (MAP.inSmoke(G.map, tm.x, tm.y) || MAP.inSmoke(G.map, from.x, from.y)) acc *= .5;   // firing into or out of smoke
     if (t.type === 'squad') {
       const cover = w.ignoresCover ? 'none' : t.garrison != null ? 'garrison' : MAP.coverAt(G.map, tm.x, tm.y, from.x, from.y);
       const C = D.COVER[cover] || D.COVER.none, tvb = SIM.vetBonus(t);
@@ -296,10 +298,20 @@ const COMBAT = (() => {
   }
 
   /* ---------------- indirect fire and grenades ---------------- */
-  function lobShell(G, sq, from, w, x, y, barrage) {
+  /* smoke: a cloud that swells to full size in about two seconds, holds, then thins away */
+  function popSmoke(G, x, y, S) {
+    (G.map.smokes = G.map.smokes || []).push({ x, y, r: 0, R: S.radius, t0: G.t, life: S.life });
+    G.fx.push({ kind: 'muzzle', x, y, t: G.t, big: 0, life: .2 });
+  }
+  function stepSmoke(G) {
+    const m = G.map; if (!m.smokes || !m.smokes.length) return;
+    for (const s of m.smokes) { const age = G.t - s.t0; s.r = s.R * Math.min(1, age / 2) * (age > s.life - 5 ? Math.max(0, (s.life - age) / 5) : 1); }
+    m.smokes = m.smokes.filter(s => G.t - s.t0 < s.life);
+  }
+  function lobShell(G, sq, from, w, x, y, barrage, smoke) {
     const d = Math.hypot(x - from.x, y - from.y), sc = U.profile(w.scatter, w.rng, d) * (barrage ? 1 : 1);
     const a = G.rng() * U.TAU, r = Math.sqrt(G.rng()) * sc * .5;
-    G.projectiles.push({ kind: 'mortar', ax: from.x, ay: from.y, x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, t0: G.t, t1: G.t + (w.flight || 3), w, src: sq.id, owner: sq.owner, arc: 1 });
+    G.projectiles.push({ kind: 'mortar', ax: from.x, ay: from.y, x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, t0: G.t, t1: G.t + (w.flight || 3), w, src: sq.id, owner: sq.owner, arc: 1, smoke: smoke || null });
     G.fx.push({ kind: 'muzzle', x: from.x, y: from.y, t: G.t, big: 1, life: .2, up: true });
   }
   function throwGrenade(G, sq, m, x, y, ab) {
@@ -312,7 +324,9 @@ const COMBAT = (() => {
     for (const p of G.projectiles) {
       if (G.t < p.t1) { keep.push(p); continue; }
       const src = G.byId.get(p.src);
-      if (p.kind === 'grenade') explode(G, p.x, p.y, p.ab.dmg, p.ab.aoe, 20, src, p.owner, 1);
+      if (p.kind === 'grenade' && p.ab.smoke) popSmoke(G, p.x, p.y, p.ab.smoke);
+      else if (p.kind === 'mortar' && p.smoke) popSmoke(G, p.x, p.y, p.smoke);
+      else if (p.kind === 'grenade') explode(G, p.x, p.y, p.ab.dmg, p.ab.aoe, 20, src, p.owner, 1);
       else if (p.kind === 'mortar') explode(G, p.x, p.y, p.w.dmg, p.w.aoe, p.w.pen[0], src, p.owner, 1.2);
       else if (p.vs) {
         const v = G.byId.get(p.vs);

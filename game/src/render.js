@@ -300,6 +300,7 @@ const RENDER = (() => {
     for (const o of list) o.f();
     drawProjectiles(G, c, k);
     drawFx(G, c, k);
+    drawSmoke(G, c, k);
     // fog
     if (!ui.noFog) {
       const [fx, fy] = toScreen(0, 0), C = FOG.C;
@@ -567,6 +568,20 @@ const RENDER = (() => {
     if (age < 60) for (let i = 0; i < 4; i++) {
       const tt = ((G.t * .35 + i * .25) % 1), [px, py] = toScreen(w.x + tt * 2, w.y - tt, 1.5 + tt * 7);
       c.fillStyle = `rgba(50,48,44,${.35 * (1 - tt) * (1 - age / 60)})`; c.beginPath(); c.arc(px, py, (8 + tt * 26) * k, 0, U.TAU); c.fill();
+    }
+  }
+  /* smoke clouds: overlapping soft puffs that drift a little and swell with the cloud */
+  function drawSmoke(G, c, k) {
+    for (const sm of G.map.smokes || []) {
+      if (sm.r < .3) continue;
+      const r = U.rng((sm.t0 * 1000) | 0), age = G.t - sm.t0;
+      for (let i = 0; i < 14; i++) {
+        const a = r() * U.TAU, d = Math.sqrt(r()) * sm.r * .75, z = .6 + r() * 2.4 + age * .03, drift = age * .08;
+        const [sx, sy] = toScreen(sm.x + Math.cos(a) * d + drift, sm.y + Math.sin(a) * d - drift, z);
+        const pr = (sm.r * .45 + r() * sm.r * .25) * 22 * k;
+        c.fillStyle = `rgba(${200 + (i % 3) * 10},${200 + (i % 3) * 10},${195 + (i % 3) * 10},${.16 + .1 * (sm.r / sm.R)})`;
+        c.beginPath(); c.ellipse(sx, sy, pr, pr * .7, 0, 0, U.TAU); c.fill();
+      }
     }
   }
   /* an abandoned team weapon (its own sprite, unmanned) or a dropped special weapon (a small marker) */

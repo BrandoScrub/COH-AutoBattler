@@ -195,7 +195,7 @@ const SIM = (() => {
     if (e.type === 'squad' && e.models.some(m => m.alive) && isPinned(e) && o.type !== 'retreat') return;   // pinned squads only retreat
     // a garrisoned squad steps out for anything that takes it elsewhere; it fires from the windows for attack orders
     if (e.type === 'squad' && e.garrison != null && ['move', 'attackMove', 'retreat', 'build', 'repair'].includes(o.type)) leaveHouse(G, e, o.x, o.y);
-    if (e.type === 'squad' && e.garrison != null && o.type === 'ability' && o.id === 'barrage') leaveHouse(G, e, o.x, o.y);
+    if (e.type === 'squad' && e.garrison != null && o.type === 'ability' && (o.id === 'barrage' || o.id === 'smokeBarrage')) leaveHouse(G, e, o.x, o.y);
     switch (o.type) {
       case 'garrison': if (canGarrison(e)) orderGarrison(G, e, G.map.houses[o.house]); break;
       case 'pickup': orderPickup(G, e, dropById(G, o.drop)); break;
@@ -413,10 +413,12 @@ const SIM = (() => {
     if (e.order.id === 'breach') return stepBreach(G, e);
     const o = e.order, ab = D.ABILITIES[o.id], d = Math.hypot(o.x - e.x, o.y - e.y);
     if (ab.minRange && d < ab.minRange) { e.order = { type: 'idle' }; return; }
-    if (o.id === 'barrage') {
+    if (o.id === 'barrage' || o.id === 'smokeBarrage') {
       if (!crewReady(e)) { if (e.crew.state === 'packed') setup(G, e, Math.atan2(o.y - e.y, o.x - e.x)); return; }
       if (d > ab.range) { e.order = { type: 'move', x: o.x, y: o.y }; setPath(G, e, o.x, o.y); return; }
-      e.barrage = { x: o.x, y: o.y, left: ab.shots, t: 0 }; e.cooldowns[o.id] = G.t + ab.cooldown; e.order = { type: 'idle' };
+      if (!canAfford(G.players[e.owner], ab.cost)) { e.order = { type: 'idle' }; event(G, e.owner, 'error', 'Not enough munitions', e.x, e.y); return; }
+      pay(G.players[e.owner], ab.cost);
+      e.barrage = { x: o.x, y: o.y, left: ab.shots, t: 0, smoke: ab.smoke || null }; e.cooldowns[o.id] = G.t + ab.cooldown; e.order = { type: 'idle' };
       return;
     }
     if (d > ab.range - 1) { if (!e.path || !e.path.length) setPath(G, e, o.x, o.y); return; }

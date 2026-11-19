@@ -34,7 +34,7 @@ const FOG = (() => {
       const x = (ax + (bx - ax) * i / n) | 0, y = (ay + (by - ay) * i / n) | 0;
       if (m.block[y * m.w + x] & 4) return false;
     }
-    return true;
+    return !MAP.smokeBlocks(m, ax, ay, bx, by);
   }
   function seen(G, slot, x, y) {
     const P = G.players[slot], gw = G.map.w / C;

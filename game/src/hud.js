@@ -41,6 +41,7 @@ const HUD = (() => {
     tanktrap: g => { g.lineWidth = 4; g.beginPath(); g.moveTo(-12, 12); g.lineTo(12, -12); g.moveTo(-12, -12); g.lineTo(12, 12); g.moveTo(0, -15); g.lineTo(0, 15); g.stroke(); },
     flame: g => { g.fillStyle = '#ff9a3a'; g.beginPath(); g.moveTo(0, -15); g.quadraticCurveTo(14, 0, 6, 14); g.quadraticCurveTo(0, 6, -6, 14); g.quadraticCurveTo(-14, 0, 0, -15); g.fill(); },
     lmg: g => { g.lineWidth = 3; g.beginPath(); g.moveTo(-15, 3); g.lineTo(15, -3); g.moveTo(5, -1); g.lineTo(3, 10); g.moveTo(-3, 1); g.lineTo(-6, 10); g.stroke(); },
+    smoke: g => { g.fillStyle = '#c9c9c4'; for (const [x, y, r] of [[-7, 4, 8], [4, 2, 9], [-1, -7, 8], [9, -6, 6]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); } g.fillStyle = '#555'; g.fillRect(-12, 10, 6, 6); },
     breach: g => { g.fillStyle = '#8a6a44'; g.fillRect(-8, -14, 16, 26); g.fillStyle = '#222'; g.fillRect(-5, -10, 10, 22); g.fillStyle = '#ffb03a'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, r = i % 2 ? 5 : 11; g.lineTo(9 + Math.cos(a) * r, 2 + Math.sin(a) * r); } g.fill(); },
     unload: g => { g.fillStyle = '#c9b88c'; g.beginPath(); g.moveTo(-14, -2); g.lineTo(-4, -12); g.lineTo(6, -2); g.lineTo(6, 12); g.lineTo(-14, 12); g.closePath(); g.fill(); g.fillStyle = '#5ad6ff'; g.beginPath(); g.moveTo(16, 4); g.lineTo(6, -4); g.lineTo(6, 0); g.lineTo(-2, 0); g.lineTo(-2, 8); g.lineTo(6, 8); g.lineTo(6, 12); g.closePath(); g.fill(); },
     lock: g => { g.strokeStyle = '#999'; g.beginPath(); g.arc(0, -4, 7, Math.PI, 0); g.stroke(); g.fillStyle = '#999'; g.fillRect(-10, -4, 20, 15); },
@@ -152,7 +153,7 @@ const HUD = (() => {
     if (e.type === 'squad') {
       let a = 4;
       for (const ab of e.def.abilities || []) {
-        const A = D.ABILITIES[ab], cd = Math.max(0, (e.cooldowns[ab] || 0) - G.t), why = cd > 0 ? 'Recharging' : !SIM.canAfford(P, A.cost) ? 'Not enough munitions' : (ab === 'barrage' && !e.crew) ? 'No mortar' : null;
+        const A = D.ABILITIES[ab], cd = Math.max(0, (e.cooldowns[ab] || 0) - G.t), why = cd > 0 ? 'Recharging' : !SIM.canAfford(P, A.cost) ? 'Not enough munitions' : ((ab === 'barrage' || ab === 'smokeBarrage') && !e.crew) ? 'No mortar' : null;
         out[a++] = { img: ico(A.icon), label: A.name, tip: ab === 'breach' ? `<b>${A.name}</b><div>${costStr(A.cost)} &middot; click a building the enemy holds &middot; ${A.cooldown}s recharge</div><div>Grenades through the door throw the garrison out hurt and suppressed; your squad takes the building.</div>` : `<b>${A.name}</b><div>${costStr(A.cost)} &middot; range ${A.range} m &middot; ${A.cooldown}s recharge</div>`, cost: A.cost, cd, disabled: !!why, why, act: () => { ui.mode = { type: 'ability', id: ab, ids: sel.filter(s => (s.def.abilities || []).includes(ab)).map(s => s.id) }; } };
       }
       if (e.crew) out[6] = { img: ico('setup'), label: e.crew.state === 'packed' ? 'Set up facing' : 'Re-face', tip: '<b>Set up facing</b><div>Click a direction. The weapon only fires inside its arc.</div>', act: () => { ui.mode = { type: 'face', ids: sel.filter(s => s.crew).map(s => s.id) }; } };
@@ -642,7 +643,7 @@ const HUD = (() => {
       if (m.type === 'place') ui.ghost = { kind: 'building', id: m.what, x: wx, y: wy, err: SIM.canPlace(G, 0, m.what, wx, wy) };
       else if (m.type === 'line') ui.ghost = m.start ? { kind: 'line', x: m.start.x, y: m.start.y, x2: wx, y2: wy } : { kind: 'target', x: wx, y: wy, r: 1.5 };
       else if (m.type === 'ability' && m.id === 'breach') { const hb = mouse.inCanvas ? houseAtScreen(mouse.x, mouse.y) : null, o = hb && hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = hb ? { kind: 'house', h: hb, ok: !!(o && o.owner === 1), label: o && o.owner === 1 ? 'Breach' : 'No enemy inside' } : { kind: 'target', x: wx, y: wy, r: 1.5, err: 'Pick a building the enemy holds' }; }
-      else if (m.type === 'ability') { const A = D.ABILITIES[m.id], e = G.byId.get(m.ids[0]); const d = e ? Math.hypot(wx - e.x, wy - e.y) : 0; ui.ghost = { kind: 'target', x: wx, y: wy, r: A.id === 'barrage' ? 6 : 4, err: A.minRange && d < A.minRange ? 'Too close' : null }; }
+      else if (m.type === 'ability') { const A = D.ABILITIES[m.id], e = G.byId.get(m.ids[0]); const d = e ? Math.hypot(wx - e.x, wy - e.y) : 0; ui.ghost = { kind: 'target', x: wx, y: wy, r: A.smoke ? A.smoke.radius : m.id === 'barrage' ? 6 : 4, err: A.minRange && d < A.minRange ? 'Too close' : null }; }
       else if (m.type === 'face') { const e = G.byId.get(m.ids[0]); if (e) ui.ghost = { kind: 'face', x: e.x, y: e.y, a: Math.atan2(wy - e.y, wx - e.x) }; }
     }
     if (mouse.rdown && Math.hypot(mouse.x - mouse.rdown.x, mouse.y - mouse.rdown.y) > 12) { const [sx, sy] = RENDER.toWorld(mouse.rdown.x, mouse.rdown.y); ui.ghost = { kind: 'face', x: sx, y: sy, a: Math.atan2(wy - sy, wx - sx) }; }

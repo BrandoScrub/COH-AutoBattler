@@ -224,8 +224,20 @@ const MAP = (() => {
       const x = (ax + (bx - ax) * i / n) | 0, y = (ay + (by - ay) * i / n) | 0;
       if (m.block[y * m.w + x] & BL) return false;
     }
-    return true;
+    return !smokeBlocks(m, ax, ay, bx, by);
   }
+  /* smoke: a sight line through the thick of a cloud is blocked; men inside a cloud see and are seen only close by */
+  function smokeBlocks(m, ax, ay, bx, by) {
+    if (!m.smokes || !m.smokes.length) return false;
+    for (const s of m.smokes) {
+      const r = s.r * .8; if (r <= .5) continue;
+      if (U.segDist2(s.x, s.y, ax, ay, bx, by) > r * r) continue;
+      if (Math.hypot(bx - ax, by - ay) < 7) continue;
+      return true;
+    }
+    return false;
+  }
+  function inSmoke(m, x, y) { for (const s of m.smokes || []) if (U.dist2(x, y, s.x, s.y) < (s.r * .8) ** 2) return true; return false; }
 
   /* ---- sectors: Voronoi of the points (plus a base sector round each HQ) on a 2 m grid ---- */
   const BASE_R = 54;   // a base sector reaches at most this far from its HQ (CoH3 bases are a compact block round the HQ)
@@ -347,6 +359,6 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
+  return { smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;
