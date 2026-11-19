@@ -404,21 +404,21 @@ Numbers match the fifth screenshot: ten minutes in, an MG 42 team selected and s
 
 Original: [screenshots/08-headquarters-command-card.jpg](screenshots/08-headquarters-command-card.jpg) · Legend image: [boards/08-headquarters-command-card-legend.png](boards/08-headquarters-command-card-legend.png)
 
-Numbers match the sixth screenshot: the same match as the headquarters board, one second later (00:06), with the Wehrmacht HQ still selected. That board covers the HUD at match start; this one goes slot by slot through the HQ's command card, the production tabs and the building itself. Own numbering. Costs, times and health are from CoH3 game data ([coh3stats.com](https://coh3stats.com/explorer/races/german)) and Relic's patch notes; confirm in game before locking values.
+Numbers match the sixth screenshot: the same match as the headquarters board, one second later (00:06), with the Wehrmacht HQ still selected. That board covers the HUD at match start; this one goes slot by slot through the HQ's command card, the production tabs and the building itself. Own numbering. Costs, times and health are from CoH3 game data ([coh3stats.com](https://coh3stats.com/explorer/races/german)) and Relic's patch notes; confirm in game before locking values. Items 4 and 12 were confirmed in review.
 
 ### Screen-anchored HUD
 
 **1. One tab per building** After an empty slot come five tabs: house (Headquarters), soldier (Infanterie Kompanie), shield (Luftwaffe Kompanie), half-track (Panzergrenadier Kompanie) and tank (Panzer Kompanie). That is the Wehrmacht's full building list, in tech order, and the same four buildings sit on the card's bottom row (6). Only the house is lit.
 - *Build:* tabs = the HQ plus each production building in the faction data, in tech order; lit once you own one (board 06, item 9).
 
-**2. Reinforce toggle** Red cross with T at the top of the slot column, outside the 4 by 3 grid. It belongs to the building, not to a grid slot (board 05, item 9).
-- *Build:* building-level toggles live in the slot column, not the grid.
+**2. T: red cross** Red cross with T at the top of the slot column, outside the 4 by 3 grid. Board 05 read this as the reinforce toggle, but the confirmed auto-reinforce toggle is A (4), so T is a separate building-level control; check its tooltip.
+- *Build:* building-level controls live in the slot column, not the grid.
 
 **3. Production row: Q and W** Units are shown as portraits. Q Pioneer Squad (125 manpower, 4 population, 18 s, 3 men). W Kettenkrad Recon Vehicle (160 manpower, 2 population, 20 s): unarmed, fast, captures points 1.5 times as fast as infantry. Population reads 4/100: exactly the one starting Pioneer squad.
 - *Build:* production buttons are unit portraits; the tooltip shows cost, population and build time.
 
-**4. A: toggle, switched on** Red cross inside orange circular arrows, with a green light at the corner, so it is a toggle and it is on. Best guess: a healing or auto-reinforce behaviour of the HQ (the Wehrmacht HQ has a Medical Stations upgrade in CoH3), but it can't be confirmed from the shot. Hover it in game.
-- *Build:* a toggle shows its state as a corner light: green on, no light off.
+**4. A: auto-reinforce toggle** Red cross inside orange circular arrows, green light at the corner: the automatic reinforcement toggle, switched on (confirmed). While on, squads that have lost models are refilled automatically near the HQ, and every replacement model costs manpower (Pioneers about 22 a man). Off, squads stay under strength and the manpower is kept.
+- *Build:* per-player auto-reinforce flag on reinforce points; each model refilled charges the unit's reinforce cost. Toggle state shown as a corner light: green on, none off.
 
 **5. F: set rally point** Red flag on F, the far-right slot of the middle row. Click it, then click the ground; the cyan flag beside the HQ (board 05, item 13) marks the result.
 - *Build:* rally point is a targeted order on every production building, always in the same slot.
@@ -443,8 +443,8 @@ Numbers match the sixth screenshot: the same match as the headquarters board, on
 **11. Concrete bunkers** Two concrete bunkers just outside the base, ringed with stones. Neutral emplacements either side can occupy; Pioneers can build the same kind of Concrete Bunker for 175 manpower.
 - *Build:* neutral bunker type with garrison slots and health, shared with the buildable one.
 
-**12. Trench or rubble track** A stony strip runs from the top bunker down towards the left one. It reads as a trench or rubble track linking the two. CoH3 maps do use trenches as cover; confirm what this one is in game.
-- *Build:* if it is a trench: a cover strip infantry can move along, crossable by vehicles.
+**12. Rubble strip, not a trench** A stony strip runs from the top bunker down towards the left one. Confirmed not a trench: it is gravel or rubble on the ground surface, linking the two bunkers visually.
+- *Build:* ground decal only; no cover or movement effect unless testing shows otherwise.
 
 **13. Dune ridge** A raised sand ridge in front of the HQ. Height counts in CoH3: units on top shoot down past the target's cover (systems board), so the ridge is the strongest ground near the base.
 - *Build:* paint height bands into the map; the cover override reads them.
@@ -471,7 +471,7 @@ Numbers match the seventh screenshot: 01:28 into a skirmish, a Pioneer squad sel
 **4. Minimap point types and teams** Four point glyphs: stars (victory points), plain squares, circles and hatched diamonds, so the glyph shape is the point type. Own units blue, allies cyan, yellow and green (a four-a-side match), enemy base sector red at the left, white camera triangle at the top. A few points carry a white glow ring, likely being captured.
 - *Build:* one glyph per point type, always drawn even in fog; pip colour comes from the player slot (own, each ally, enemy).
 
-**5. Minimap button row** The row skipped on earlier boards. Menu, a tank and a soldier (most likely select all vehicles and select all infantry), the game logo, then three pings: red crosshair (attack here), blue shield (defend here) and a green frame (probably focus here). Above it: the gold tactical-map button at the left and pause at the right.
+**5. Minimap button row** The row skipped on earlier boards. Menu, then the tank button (selects all vehicles) and the soldier button (selects all infantry), both confirmed; the game logo; then three pings: red crosshair (attack here), blue shield (defend here) and a green frame (probably focus here). Above it: the gold tactical-map button at the left and pause at the right.
 - *Build:* menu, select-all and tactical map are needed in single player; pings wait until there are allies to read them.
 
 **6. Resources and upkeep** Manpower 38 (+263), munitions 32 (+10), fuel 13 (+10), population 16/100. Manpower income has dropped from +270 at the start (board 08) to +263: upkeep. Every unit on the field costs manpower per minute (Pioneers 4.2), so a bigger army earns less.
