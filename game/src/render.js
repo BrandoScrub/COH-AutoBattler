@@ -259,6 +259,7 @@ const RENDER = (() => {
   }
 
   function frame(G, ui, alpha) {
+    R.G = G;
     const c = R.ctx, k = R.cam.k, me = 0;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
@@ -278,7 +279,7 @@ const RENDER = (() => {
     // shadows of everything that moves, then all objects back to front
     const list = [];
     for (const t of G.map.trees) if (vis(t.x, t.y, 160)) list.push({ d: t.x + t.y, f: () => drawTree(c, t, k) });
-    for (const h of G.map.houses) if (vis(h.x, h.y, 260)) list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
+    for (const h of G.map.houses) if (!h.dead && vis(h.x, h.y, 260)) list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
     for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) });
     for (const w of G.wrecks || []) if (vis(w.x, w.y, 200)) list.push({ d: w.x + w.y, f: () => drawWreck(G, c, w, k) });
     if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
@@ -380,8 +381,12 @@ const RENDER = (() => {
     c.fillStyle = '#3c3428';
     for (let y = y0 + 1.6; y < y1 - .8; y += 2.6) win(x1 + .01, y, 2.2, 'x');
     for (let x = x0 + 1.6; x < x1 - .8; x += 2.6) win(x, y1 + .01, 2.2, 'y');
+    // battle damage: scorched walls below 60%, a broken roof below 30%
+    const hf = h.hp / h.maxHp;
+    if (hf < .6) { c.fillStyle = `rgba(30,24,18,${(.6 - hf) * .9})`; const P2 = [[x1 + .02, y0, 0], [x1 + .02, y1, 0], [x1 + .02, y1, H], [x1 + .02, y0, H]]; c.beginPath(); P2.forEach(([a, b, z], i) => { const [px, py] = toScreen(a, b, z); i ? c.lineTo(px, py) : c.moveTo(px, py); }); c.closePath(); c.fill(); const P3 = [[x0, y1 + .02, 0], [x1, y1 + .02, 0], [x1, y1 + .02, H], [x0, y1 + .02, H]]; c.beginPath(); P3.forEach(([a, b, z], i) => { const [px, py] = toScreen(a, b, z); i ? c.lineTo(px, py) : c.moveTo(px, py); }); c.closePath(); c.fill(); }
     // gable roof along the long side
     const roof = h.roof === 'slate' ? ['#6f6a66', '#57524e', '#807a75'] : ['#b5643c', '#934c2c', '#c87850'];
+    if (hf < .3) { roof[0] = '#3a2c22'; roof[2] = '#4a382a'; }
     const along = h.w >= h.d, ridge = H + 2.2;
     const P = (x, y, z) => toScreen(x, y, z);
     const poly = (pts, col) => { c.fillStyle = col; c.beginPath(); pts.forEach(([x, y, z], i) => { const [a, b] = P(x, y, z); i ? c.lineTo(a, b) : c.moveTo(a, b); }); c.closePath(); c.fill(); };
@@ -393,6 +398,15 @@ const RENDER = (() => {
       poly([[x0 - .3, y1 + .3, H], [x1 + .3, y1 + .3, H], [h.x, y1 + .3, ridge]], wall[1]);
       poly([[h.x, y0 - .3, ridge], [h.x, y1 + .3, ridge], [x1 + .3, y1 + .3, H], [x1 + .3, y0 - .3, H]], roof[2]);
       poly([[x0 - .3, y0 - .3, H], [h.x, y0 - .3, ridge], [h.x, y1 + .3, ridge], [x0 - .3, y1 + .3, H]], roof[0]);
+    }
+    // occupied: the occupier's flag on the ridge (enemy flags only once the house has been seen)
+    if (h.occ != null && R.G) {
+      const o = R.G.byId.get(h.occ);
+      if (o && !o.dead && (o.owner === 0 || FOG.visible(R.G, 0, o))) {
+        const [px, py] = toScreen(h.x, h.y, ridge), [qx, qy] = toScreen(h.x, h.y, ridge + 3.2);
+        c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
+        c.fillStyle = TEAM[o.owner]; c.fillRect(qx, qy, 15 * k, 10 * k);
+      }
     }
   }
   function drawCover(c, cv, k) {
@@ -421,6 +435,10 @@ const RENDER = (() => {
       for (let i = 0; i <= n; i++) { const t = i / n, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t, .45 + Math.sin(i * 2.1) * .25); i ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }
       c.stroke();
       for (let i = 0; i <= n; i += 3) { const t = i / n, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t), [tx, ty] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t, 1); c.strokeStyle = '#5a4a32'; c.lineWidth = 2 * k; c.beginPath(); c.moveTo(sx, sy); c.lineTo(tx, ty); c.stroke(); }
+    } else if (cv.kind === 'rubble') {
+      const n = Math.max(1, Math.round(L / .7)), r = U.rng(cv.id * 7 + 3);
+      for (let i = 0; i <= n; i++) { const t = i / n, j = r() - .5, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t + j * .5, cv.ay + (cv.by - cv.ay) * t - j * .5, r() * .5); const s2 = k * (.7 + r() * .5); c.globalAlpha = .9; c.drawImage(R.sprites.stone, sx - 12 * s2, sy - 9 * s2, 24 * s2, 16 * s2); }
+      c.globalAlpha = 1;
     } else if (cv.kind === 'wreck') { /* drawn with its wreck */ }
     if (a < 1) c.globalAlpha = 1;
   }
@@ -473,6 +491,7 @@ const RENDER = (() => {
   const FULL = new Set(['rifleman', 'leader', 'lmg', 'sapper', 'flamethrower', 'sniper', 'assault_trooper', 'rocket_gunner']);
   function memOf(obj) { let m = R.mem.get(obj); if (!m) R.mem.set(obj, m = {}); return m; }
   function drawSquadParts(G, sq, k, list, shadows) {
+    if (sq.garrison != null) return;   // inside a house: the house shows the flag, muzzle flashes show at the windows
     const side = G.players[sq.owner].side, alive = sq.models.filter(m => m.alive);
     const deployed = sq.crew && sq.crew.state !== 'packed';
     const lay = deployed ? G.layout && G.layout.weapons[side + '_' + sq.def.crewWeapon] : null;
@@ -674,7 +693,7 @@ const RENDER = (() => {
   R.star = star; R.pointIcon = pointIcon;
   function drawDecorator(G, c, e, k, selected, ui) {
     let x, y, z;
-    if (e.type === 'squad') { const al = e.models.filter(m => m.alive); if (!al.length) return; x = al.reduce((a, m) => a + m.x, 0) / al.length; y = al.reduce((a, m) => a + m.y, 0) / al.length; z = 3.4; }
+    if (e.type === 'squad') { const al = e.models.filter(m => m.alive); if (!al.length) return; x = al.reduce((a, m) => a + m.x, 0) / al.length; y = al.reduce((a, m) => a + m.y, 0) / al.length; z = e.garrison != null ? 9.5 : 3.4; }
     else if (e.type === 'vehicle') { x = e.x; y = e.y; z = 4.6; }
     else { x = e.x - e.w / 2; y = e.y - e.d / 2; z = 7.5; }
     let [sx, sy] = toScreen(x, y, z);
@@ -731,6 +750,10 @@ const RENDER = (() => {
       const [sx, sy] = toScreen(g.x, g.y); c.strokeStyle = g.err ? '#f66' : '#ffcf4a'; c.lineWidth = 2;
       c.beginPath(); c.ellipse(sx, sy, (g.r || 4) * 31 * k, (g.r || 4) * 15.5 * k, 0, 0, U.TAU); c.stroke();
       if (g.err) { c.fillStyle = '#fbb'; c.font = '600 13px Inter'; c.fillText(g.err, sx + 10, sy - 10); }
+    } else if (g.kind === 'house') {
+      const h = g.h; c.strokeStyle = g.ok ? '#6f6' : '#f66'; c.lineWidth = 2; c.fillStyle = g.ok ? 'rgba(90,220,140,.18)' : 'rgba(255,80,60,.18)';
+      c.beginPath(); [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b], i) => { const [sx, sy] = toScreen(h.x + a * (h.w / 2 + .4), h.y + b * (h.d / 2 + .4)); i ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }); c.closePath(); c.fill(); c.stroke();
+      const [lx, ly] = toScreen(h.x, h.y, 8.5); c.font = '700 13px Inter, system-ui'; c.textAlign = 'center'; c.fillStyle = 'rgba(0,0,0,.7)'; const tw = c.measureText(g.label).width; c.fillRect(lx - tw / 2 - 6, ly - 13, tw + 12, 19); c.fillStyle = g.ok ? '#bfffbf' : '#ffb3a8'; c.fillText(g.label, lx, ly + 1); c.textAlign = 'left';
     } else if (g.kind === 'face') {
       const [ax, ay] = toScreen(g.x, g.y), [bx, by] = toScreen(g.x + Math.cos(g.a) * 8, g.y + Math.sin(g.a) * 8);
       c.strokeStyle = '#ffd34d'; c.lineWidth = 3; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();

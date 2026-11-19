@@ -76,7 +76,7 @@ const MAP = (() => {
       { x: 30, y: 122, w: 7, d: 6 }, { x: 62, y: 152, w: 8, d: 6 }, { x: 100, y: 140, w: 6, d: 8 }, { x: 46, y: 84, w: 7, d: 7 },
     ];
     const addHouse = h => {
-      const house = { id: m.houses.length, x: h.x, y: h.y, w: h.w, d: h.d, hp: 1200, maxHp: 1200, roof: R.pick(['tile', 'tile', 'slate']), wall: R.pick(['stucco', 'stone', 'stucco']) };
+      const house = { id: m.houses.length, x: h.x, y: h.y, w: h.w, d: h.d, hp: 1200, maxHp: 1200, occ: null, dead: false, roof: R.pick(['tile', 'tile', 'slate']), wall: R.pick(['stucco', 'stone', 'stucco']) };
       m.houses.push(house);
       for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
         if (inside(x, y)) m.block[idx(x, y)] |= BI | BV | BL;
@@ -252,6 +252,18 @@ const MAP = (() => {
   }
   const sectorAt = (m, x, y) => m.sectors[m.sectorGrid[U.clamp((y / SEC) | 0, 0, m.secH - 1) * m.secW + U.clamp((x / SEC) | 0, 0, m.secW - 1)]];
 
+  /* ---- houses: which one is at a point, and collapse into rubble (CoH3 buildings are destructible) ---- */
+  function houseAt(m, x, y, pad) { const p = pad || 0; for (const h of m.houses) if (!h.dead && Math.abs(x - h.x) <= h.w / 2 + p && Math.abs(y - h.y) <= h.d / 2 + p) return h; return null; }
+  function collapseHouse(m, h) {
+    if (h.dead) return; h.dead = true; h.hp = 0; h.occ = null;
+    for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
+      if (x >= 0 && y >= 0 && x < m.w && y < m.h) m.block[y * m.w + x] &= ~(BI | BV | BL);
+    // the walls fall into knee-high rubble: heavy cover along the old outline, passable on foot, a tank can push through
+    const x0 = h.x - h.w / 2 + .4, x1 = h.x + h.w / 2 - .4, y0 = h.y - h.d / 2 + .4, y1 = h.y + h.d / 2 - .4;
+    for (const [ax, ay, bx, by] of [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]]) m.addCover('rubble', ax, ay, bx, by, { cover: 'heavy', hp: 500 });
+    m.navDirty = true; m.version++;
+  }
+
   /* ---- navigation: A* on the 1 m grid, vehicles on a grid with obstacles grown by their clearance ---- */
   function navGrids(m) {
     if (!m.navDirty && m.nav) return m.nav;
@@ -335,6 +347,6 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
+  return { houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;

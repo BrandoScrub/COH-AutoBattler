@@ -41,6 +41,8 @@ const HUD = (() => {
     tanktrap: g => { g.lineWidth = 4; g.beginPath(); g.moveTo(-12, 12); g.lineTo(12, -12); g.moveTo(-12, -12); g.lineTo(12, 12); g.moveTo(0, -15); g.lineTo(0, 15); g.stroke(); },
     flame: g => { g.fillStyle = '#ff9a3a'; g.beginPath(); g.moveTo(0, -15); g.quadraticCurveTo(14, 0, 6, 14); g.quadraticCurveTo(0, 6, -6, 14); g.quadraticCurveTo(-14, 0, 0, -15); g.fill(); },
     lmg: g => { g.lineWidth = 3; g.beginPath(); g.moveTo(-15, 3); g.lineTo(15, -3); g.moveTo(5, -1); g.lineTo(3, 10); g.moveTo(-3, 1); g.lineTo(-6, 10); g.stroke(); },
+    breach: g => { g.fillStyle = '#8a6a44'; g.fillRect(-8, -14, 16, 26); g.fillStyle = '#222'; g.fillRect(-5, -10, 10, 22); g.fillStyle = '#ffb03a'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, r = i % 2 ? 5 : 11; g.lineTo(9 + Math.cos(a) * r, 2 + Math.sin(a) * r); } g.fill(); },
+    unload: g => { g.fillStyle = '#c9b88c'; g.beginPath(); g.moveTo(-14, -2); g.lineTo(-4, -12); g.lineTo(6, -2); g.lineTo(6, 12); g.lineTo(-14, 12); g.closePath(); g.fill(); g.fillStyle = '#5ad6ff'; g.beginPath(); g.moveTo(16, 4); g.lineTo(6, -4); g.lineTo(6, 0); g.lineTo(-2, 0); g.lineTo(-2, 8); g.lineTo(6, 8); g.lineTo(6, 12); g.closePath(); g.fill(); },
     lock: g => { g.strokeStyle = '#999'; g.beginPath(); g.arc(0, -4, 7, Math.PI, 0); g.stroke(); g.fillStyle = '#999'; g.fillRect(-10, -4, 20, 15); },
   };
   const ico = name => icon(name, ICONS[name] || ICONS.stop);
@@ -146,11 +148,12 @@ const HUD = (() => {
     out[1] = { img: ico('stop'), label: 'Stop', tip: '<b>Stop</b>', act: () => SIM.issue(G, sel.map(s => s.id), { type: 'stop' }) };
     if (e.type === 'vehicle') out[2] = { img: ico('reverse'), label: 'Reverse', tip: '<b>Reverse</b><div>Back away keeping the front armour on the enemy.</div>', act: () => { ui.mode = { type: 'reverse' }; } };
     out[3] = { img: ico('retreat'), label: 'Retreat', tip: '<b>Retreat</b><div>Fall back to the headquarters. Retreating squads take less fire and recover from suppression.</div>', act: () => SIM.issue(G, sel.map(s => s.id), { type: 'retreat' }) };
+    if (e.type === 'squad' && e.garrison != null) out[2] = { img: ico('unload'), label: 'Exit building', tip: '<b>Exit building</b><div>Leave the house. Any move order also brings the squad out.</div>', act: () => SIM.issue(G, sel.filter(s => s.garrison != null).map(s => s.id), { type: 'unload' }) };
     if (e.type === 'squad') {
       let a = 4;
       for (const ab of e.def.abilities || []) {
         const A = D.ABILITIES[ab], cd = Math.max(0, (e.cooldowns[ab] || 0) - G.t), why = cd > 0 ? 'Recharging' : !SIM.canAfford(P, A.cost) ? 'Not enough munitions' : (ab === 'barrage' && !e.crew) ? 'No mortar' : null;
-        out[a++] = { img: ico(A.icon), label: A.name, tip: `<b>${A.name}</b><div>${costStr(A.cost)} &middot; range ${A.range} m &middot; ${A.cooldown}s recharge</div>`, cost: A.cost, cd, disabled: !!why, why, act: () => { ui.mode = { type: 'ability', id: ab, ids: sel.filter(s => (s.def.abilities || []).includes(ab)).map(s => s.id) }; } };
+        out[a++] = { img: ico(A.icon), label: A.name, tip: ab === 'breach' ? `<b>${A.name}</b><div>${costStr(A.cost)} &middot; click a building the enemy holds &middot; ${A.cooldown}s recharge</div><div>Grenades through the door throw the garrison out hurt and suppressed; your squad takes the building.</div>` : `<b>${A.name}</b><div>${costStr(A.cost)} &middot; range ${A.range} m &middot; ${A.cooldown}s recharge</div>`, cost: A.cost, cd, disabled: !!why, why, act: () => { ui.mode = { type: 'ability', id: ab, ids: sel.filter(s => (s.def.abilities || []).includes(ab)).map(s => s.id) }; } };
       }
       if (e.crew) out[6] = { img: ico('setup'), label: e.crew.state === 'packed' ? 'Set up facing' : 'Re-face', tip: '<b>Set up facing</b><div>Click a direction. The weapon only fires inside its arc.</div>', act: () => { ui.mode = { type: 'face', ids: sel.filter(s => s.crew).map(s => s.id) }; } };
       let u = 8;
@@ -251,7 +254,7 @@ const HUD = (() => {
     if (e.type === 'squad') { const al = e.models.filter(m => m.alive); strength = `<span class="str">&#128100; ${al.length}/${e.maxModels}</span>`; hpf = al.reduce((a, m) => a + m.hp, 0) / (al.length ? al.length * al[0].maxHp : 1); }
     else hpf = e.hp / e.maxHp;
     const cov = e.type === 'squad' ? COMBAT.squadCover(G, e) : null;
-    const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.order.type === 'reverse' ? 'Reversing' : '');
+    const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.garrison != null ? 'In a building' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.order.type === 'reverse' ? 'Reversing' : '');
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
     put(body, name + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
@@ -341,6 +344,11 @@ const HUD = (() => {
 
   /* ---------------- input ---------------- */
   const mouse = { x: -1, y: -1, down: false, drag: null, rdown: null, inCanvas: false, moved: false };
+  /* the house under the cursor: test the ground point and the points behind the walls and roof as drawn */
+  function houseAtScreen(sx, sy) {
+    for (const z of [0, 1.5, 3, 4.5, 6]) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .3); if (h && FOG.explored(G, 0, h.x, h.y)) return h; }
+    return null;
+  }
   function entAt(sx, sy) {
     let best = null, bd = ui.touch ? 46 * 46 : 30 * 30;
     for (const e of G.ents) {
@@ -351,6 +359,8 @@ const HUD = (() => {
       else if (e.type === 'vehicle') { const [x, y] = RENDER.toScreen(e.x, e.y, 1); const d = (x - sx) ** 2 + (y - sy) ** 2, r = e.def.length * 12 * RENDER.cam.k; if (d < Math.max(bd, r * r)) { bd = d; best = e; } }
       else { const [wx, wy] = RENDER.toWorld(sx, sy); if (Math.abs(wx - e.x) < e.w / 2 + 1 && Math.abs(wy - e.y) < e.d / 2 + 1) { best = e; bd = 0; } }
     }
+    // a click on a garrisoned house picks the squad inside (yours, or an enemy you can see)
+    if (!best) { const h = houseAtScreen(sx, sy), o = h && h.occ != null ? G.byId.get(h.occ) : null; if (o && !o.dead && (o.owner === 0 || FOG.visible(G, 0, o))) best = o; }
     return best;
   }
   function pointAt(sx, sy) { const [wx, wy] = RENDER.toWorld(sx, sy); for (const p of G.map.points) { const [x, y] = RENDER.toScreen(p.x, p.y, 8.5); if ((x - sx) ** 2 + (y - sy) ** 2 < 15 * 15 || U.dist2(wx, wy, p.x, p.y) < 2.5 * 2.5) return p; } return null; }
@@ -431,7 +441,7 @@ const HUD = (() => {
     if (m) {
       const ids = m.ids || selEnts().filter(s => s.owner === 0).map(s => s.id);
       if (m.type === 'attackMove' || m.type === 'reverse') { SIM.issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); marker(wx, wy, m.type === 'attackMove' ? '#ff6a5a' : '#ffd36a'); pinnedNote(ids); if (!e.shiftKey) ui.mode = null; return; }
-      if (m.type === 'ability') { const ent = G.byId.get(ids[0]); if (ent) SIM.issue(G, [ent.id], { type: 'ability', id: m.id, x: wx, y: wy }); ui.mode = null; return; }
+      if (m.type === 'ability') { const ent = G.byId.get(ids[0]), hb = m.id === 'breach' ? houseAtScreen(e.clientX, e.clientY) : null; if (ent) SIM.issue(G, [ent.id], { type: 'ability', id: m.id, x: hb ? hb.x : wx, y: hb ? hb.y : wy }); ui.mode = null; return; }
       if (m.type === 'rally') { SIM.issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
       if (m.type === 'place') {
         const err = SIM.canPlace(G, 0, m.what, wx, wy) || SIM.buildReqMissing(G, 0, m.what) || (!SIM.canAfford(G.players[0], DATA.BUILDINGS[m.what].cost) ? 'Not enough resources' : null);
@@ -474,6 +484,16 @@ const HUD = (() => {
     if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
       const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
       if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } else SIM.issue(G, builders, { type: 'repair', target: t.id }); return; }
+    }
+    // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
+    const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
+    if (hh && (hh.occ == null || (G.byId.get(hh.occ) || {}).owner === 0)) {
+      const inf = sel.filter(s => s.type === 'squad' && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
+      if (inf.length) {
+        if (hh.occ == null || hh.occ === inf[0].id) SIM.issue(G, [inf[0].id], { type: 'garrison', house: hh.id }); else flash('That building is already occupied');
+        const rest = units.filter(id => id !== inf[0].id); if (rest.length) SIM.issue(G, rest, { type: 'move', x: hh.x + (hh.x < 100 ? 6 : -6), y: hh.y });
+        marker(hh.x, hh.y, '#7fe0ff'); return;
+      }
     }
     if (dragged) {
       // right-drag: move there and face the drag direction (team weapons set up that way)
@@ -601,14 +621,19 @@ const HUD = (() => {
     if (m) {
       if (m.type === 'place') ui.ghost = { kind: 'building', id: m.what, x: wx, y: wy, err: SIM.canPlace(G, 0, m.what, wx, wy) };
       else if (m.type === 'line') ui.ghost = m.start ? { kind: 'line', x: m.start.x, y: m.start.y, x2: wx, y2: wy } : { kind: 'target', x: wx, y: wy, r: 1.5 };
+      else if (m.type === 'ability' && m.id === 'breach') { const hb = mouse.inCanvas ? houseAtScreen(mouse.x, mouse.y) : null, o = hb && hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = hb ? { kind: 'house', h: hb, ok: !!(o && o.owner === 1), label: o && o.owner === 1 ? 'Breach' : 'No enemy inside' } : { kind: 'target', x: wx, y: wy, r: 1.5, err: 'Pick a building the enemy holds' }; }
       else if (m.type === 'ability') { const A = D.ABILITIES[m.id], e = G.byId.get(m.ids[0]); const d = e ? Math.hypot(wx - e.x, wy - e.y) : 0; ui.ghost = { kind: 'target', x: wx, y: wy, r: A.id === 'barrage' ? 6 : 4, err: A.minRange && d < A.minRange ? 'Too close' : null }; }
       else if (m.type === 'face') { const e = G.byId.get(m.ids[0]); if (e) ui.ghost = { kind: 'face', x: e.x, y: e.y, a: Math.atan2(wy - e.y, wx - e.x) }; }
     }
     if (mouse.rdown && Math.hypot(mouse.x - mouse.rdown.x, mouse.y - mouse.rdown.y) > 12) { const [sx, sy] = RENDER.toWorld(mouse.rdown.x, mouse.rdown.y); ui.ghost = { kind: 'face', x: sx, y: sy, a: Math.atan2(wy - sy, wx - sx) }; }
+    if (!m && !t && mouse.inCanvas && selEnts().some(s => s.owner === 0 && s.type === 'squad')) {
+      const hb = houseAtScreen(mouse.x, mouse.y);
+      if (hb) { const o = hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = { kind: 'house', h: hb, ok: !o || o.owner === 0, label: !o ? 'Garrison' : o.owner === 0 ? 'Occupied' : 'Enemy inside' }; }
+    }
     // cover preview dots where the selection would stand (white none, yellow light, green heavy, red negative)
     ui.coverPreview = null;
     const sel = selEnts().filter(s => s.owner === 0 && s.type === 'squad');
-    if (sel.length === 1 && mouse.inCanvas && !m && !t) {
+    if (sel.length === 1 && mouse.inCanvas && !m && !t && !(ui.ghost && ui.ghost.kind === 'house')) {
       const s = sel[0];
       let face = SIM.threatDir(G, s, wx, wy); if (face == null) face = Math.atan2(wy - s.y, wx - s.x);
       const out = SIM.standPlan(G, s, wx, wy, face).map(p2 => ({ x: p2.x, y: p2.y, cover: p2.cover === 'garrison' ? 'heavy' : p2.cover }));

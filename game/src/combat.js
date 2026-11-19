@@ -38,7 +38,7 @@ const COMBAT = (() => {
   function addSupp(G, sq, amount, sx, sy) {
     if (sq.retreating || sq.type !== 'squad') return;
     const al = sq.models.filter(m => m.alive); if (!al.length) return;
-    const cov = D.COVER[MAP.coverAt(G.map, al[0].x, al[0].y, sx, sy)] || D.COVER.none;
+    const cov = D.COVER[sq.garrison != null ? 'garrison' : MAP.coverAt(G.map, al[0].x, al[0].y, sx, sy)] || D.COVER.none;
     sq.supp = Math.min(D.SUPP.cap, sq.supp + amount * cov.supp * (sq.def.crewWeapon ? .5 : 1));
   }
 
@@ -74,10 +74,13 @@ const COMBAT = (() => {
       if (w.kind === 'at' && o.type !== 'vehicle' && !(o.type === 'squad' && o.def.crewWeapon && force === o)) return false;
       if (w.kind === 'small' || w.kind === 'mg' || w.kind === 'flame' || w.kind === 'sniper') if (o.type === 'vehicle' && !isLight(o)) return false;
       if (o.type === 'building' && !(w.kind === 'cannon' || w.kind === 'at' || w.kind === 'indirect')) return false;
-      const d = Math.hypot(o.x - x, o.y - y);
+      // a garrison is shot at through the windows: aim at the nearest man in a window this shooter can see
+      let ox = o.x, oy = o.y;
+      if (o.garrison != null && w.kind !== 'indirect') { const wm = windowTarget(G, o, x, y); if (!wm) return false; ox = wm.x; oy = wm.y; }
+      const d = Math.hypot(ox - x, oy - y);
       if (d > w.rng[2] + (o.type === 'building' ? Math.max(o.w, o.d) / 2 : 0) || (w.minRange && d < w.minRange)) return false;
       if (arcHalf != null) { const a = Math.abs(U.angNorm(Math.atan2(o.y - y, o.x - x) - arcCentre)); if (a > arcHalf) return false; }
-      if (w.kind !== 'indirect' && !MAP.los(G.map, x, y, o.x, o.y) && o.type !== 'building') return false;
+      if (w.kind !== 'indirect' && o.garrison == null && !MAP.los(G.map, x, y, o.x, o.y) && o.type !== 'building') return false;
       return true;
     };
     if (force && ok(force)) return force;
@@ -94,7 +97,13 @@ const COMBAT = (() => {
     }
     return best;
   }
+  function windowTarget(G, sq, x, y) {
+    let best = null, bd = 1e9;
+    for (const m of sq.models) { if (!m.alive) continue; const d = U.dist2(m.x, m.y, x, y); if (d < bd && MAP.los(G.map, x, y, m.x, m.y)) { bd = d; best = m; } }
+    return best;
+  }
   function aimPoint(G, t, x, y) {
+    if (t.type === 'squad' && t.garrison != null) return windowTarget(G, t, x, y);
     if (t.type === 'squad') { const al = t.models.filter(m => m.alive); if (!al.length) return null; let b = al[0], bd = 1e9; for (const m of al) { const d = U.dist2(m.x, m.y, x, y) + G.rng() * 30; if (d < bd) { bd = d; b = m; } } return b; }
     return t;
   }
@@ -102,7 +111,7 @@ const COMBAT = (() => {
   /* ---------------- squads firing ---------------- */
   function squadFire(G, sq, dt) {
     const alive = sq.models.filter(m => m.alive);
-    for (const m of alive) { m.since += dt; m.cover = MAP.coverAt(G.map, m.x, m.y); }
+    for (const m of alive) { m.since += dt; m.cover = sq.garrison != null ? 'garrison' : MAP.coverAt(G.map, m.x, m.y); }
     if (!alive.length || sq.retreating || sq.suppState === 2 || sq.building) return;
     sq.camo = !!(sq.def.camoInCover && sq.stillT > 2 && G.t - sq.lastFire > 4 && alive[0].cover !== 'none' && alive[0].cover !== 'negative');
     const cands = candidates(G, sq);
@@ -233,7 +242,7 @@ const COMBAT = (() => {
     G.fx.push({ kind: 'muzzle', x: from.x, y: from.y, t: G.t, big: w.kind === 'cannon' || w.kind === 'at' ? 1 : 0, life: .15 });
     let acc = U.profile(w.acc, w.rng, d) * vb.acc * (moving ? (w.moveAcc || .5) : 1) * (src.suppState === 1 ? .5 : 1);
     if (t.type === 'squad') {
-      const cover = w.ignoresCover ? 'none' : MAP.coverAt(G.map, tm.x, tm.y, from.x, from.y);
+      const cover = w.ignoresCover ? 'none' : t.garrison != null ? 'garrison' : MAP.coverAt(G.map, tm.x, tm.y, from.x, from.y);
       const C = D.COVER[cover] || D.COVER.none, tvb = SIM.vetBonus(t);
       let rAcc = tvb.rAcc * (t.retreating ? .6 : 1) * (t.crew && t.crew.state === 'deployed' && t.def.setupRAcc ? t.def.setupRAcc : 1) * (t.suppState === 2 ? 1.25 : 1);
       const p = Math.min(.98, acc * (t.def.targetSize || 1) * C.acc * rAcc);
@@ -340,6 +349,8 @@ const COMBAT = (() => {
         if (Math.abs(e.x - x) < e.w / 2 + radius && Math.abs(e.y - y) < e.d / 2 + radius) damageBuilding(G, e, dmg * .5, src);
       }
     }
+    // houses take blast damage (half the blast; small arms never hurt them), and collapse at zero
+    for (const h of G.map.houses) if (!h.dead && Math.abs(h.x - x) < h.w / 2 + radius && Math.abs(h.y - y) < h.d / 2 + radius) SIM.damageHouse(G, h, dmg * .5, src);
     // cover objects take blast damage
     for (const c of MAP.coversNear(G.map, x, y)) {
       if (!c.alive) continue;
@@ -382,6 +393,6 @@ const COMBAT = (() => {
     if (b.hp <= 0) { SIM.event(G, b.owner, 'lost', b.def.name + ' destroyed', b.x, b.y); SIM.kill(G, b); }
   }
 
-  return { step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode };
+  return { step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;

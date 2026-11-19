@@ -112,17 +112,24 @@ const AI = (() => {
       }
       // grenades at enemies in cover
       if (e.type === 'squad' && e.def.abilities && me.res.mu > 40) {
-        const ab = e.def.abilities.find(a => a !== 'barrage' && (e.cooldowns[a] || 0) < G.t);
+        const ab = e.def.abilities.find(a => a !== 'barrage' && a !== 'breach' && (e.cooldowns[a] || 0) < G.t);
         if (ab) {
           const A = D.ABILITIES[ab];
           const tgt = visibleEnemies.find(o => o.type === 'squad' && U.dist2(o.x, o.y, e.x, e.y) < (A.range - 2) ** 2 && U.dist2(o.x, o.y, e.x, e.y) > ((A.minRange || 6) + 1) ** 2 && (COMBAT.squadCover(G, o) === 'heavy' || o.def.crewWeapon));
           if (tgt && G.rng() < .5) { const m = tgt.models.find(q => q.alive); SIM.issue(G, [e.id], { type: 'ability', id: ab, x: m.x, y: m.y }); continue; }
+        }
+        // breach an enemy garrison close by
+        if (e.def.abilities.includes('breach') && (e.cooldowns.breach || 0) < G.t && me.res.mu >= 30) {
+          const gs = visibleEnemies.find(o => o.type === 'squad' && o.garrison != null && U.dist2(o.x, o.y, e.x, e.y) < 35 * 35);
+          if (gs && G.rng() < .6) { SIM.issue(G, [e.id], { type: 'ability', id: 'breach', x: gs.x, y: gs.y }); continue; }
         }
         if (e.def.abilities.includes('barrage') && (e.cooldowns.barrage || 0) < G.t && e.crew && e.crew.state === 'deployed') {
           const tgt = visibleEnemies.find(o => o.type === 'squad' && o.def.crewWeapon && U.dist2(o.x, o.y, e.x, e.y) < 85 * 85 && U.dist2(o.x, o.y, e.x, e.y) > 30 * 30);
           if (tgt) { SIM.issue(G, [e.id], { type: 'ability', id: 'barrage', x: tgt.x, y: tgt.y }); continue; }
         }
       }
+      // a garrison mostly holds its house
+      if (e.garrison != null && G.rng() > .04) continue;
       // busy moving or fighting: let it be, but re-target now and then
       const busy = (e.path && e.path.length) || e.order.type === 'attack' || (e.crew && e.crew.state !== 'packed' && G.t - e.lastFire < 8) || (G.t - e.lastFire < 3);
       if (busy && G.rng() > .08) continue;
@@ -141,6 +148,11 @@ const AI = (() => {
       const toward = enemyHq ? Math.atan2(enemyHq.y - p.y, enemyHq.x - p.x) : 0;
       let tx = p.x + G.rng.range(-4, 4), ty = p.y + G.rng.range(-4, 4);
       if (e.crew) { tx = p.x - Math.cos(toward) * 8; ty = p.y - Math.sin(toward) * 8; }
+      // infantry sometimes hold the point from a house beside it
+      if (e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < .3) {
+        const h = G.map.houses.find(h => !h.dead && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
+        if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
+      }
       if (U.dist2(tx, ty, e.x, e.y) < 6 * 6) continue;   // already there
       SIM.issue(G, [e.id], { type: e.crew ? 'move' : 'attackMove', x: tx, y: ty, face: toward });
     }

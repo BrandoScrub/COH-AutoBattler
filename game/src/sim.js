@@ -192,7 +192,12 @@ const SIM = (() => {
     if (queue && e.order.type !== 'idle' && (o.type === 'move' || o.type === 'attackMove')) { (e.queue = e.queue || []).push(o); return; }
     e.queue = [];
     if (e.type === 'squad' && e.models.some(m => m.alive) && isPinned(e) && o.type !== 'retreat') return;   // pinned squads only retreat
+    // a garrisoned squad steps out for anything that takes it elsewhere; it fires from the windows for attack orders
+    if (e.type === 'squad' && e.garrison != null && ['move', 'attackMove', 'retreat', 'build', 'repair'].includes(o.type)) leaveHouse(G, e, o.x, o.y);
+    if (e.type === 'squad' && e.garrison != null && o.type === 'ability' && o.id === 'barrage') leaveHouse(G, e, o.x, o.y);
     switch (o.type) {
+      case 'garrison': if (canGarrison(e)) orderGarrison(G, e, G.map.houses[o.house]); break;
+      case 'unload': if (e.type === 'squad' && e.garrison != null) { leaveHouse(G, e, o.x, o.y); e.order = { type: 'idle' }; } break;
       case 'stop': e.order = { type: 'idle' }; e.path = null; e.target = null; e.retreating = false; e.forceTarget = null; e.autoRev = false; e.faceTo = null; break;
       case 'move': case 'attackMove': case 'reverse':
         // a team weapon told to go where it already stands just turns to face the new way
@@ -217,7 +222,7 @@ const SIM = (() => {
         break;
       case 'attack': {
         const t = G.byId.get(o.target); if (!t) return;
-        e.retreating = false; e.forceTarget = t.id; e.order = { type: 'attack', target: t.id }; e.path = null; e.slots = null;
+        e.retreating = false; e.forceTarget = t.id; e.order = { type: e.garrison != null ? 'idle' : 'attack', target: t.id }; e.path = null; e.slots = null;
         if (e.type === 'squad') e.buildQueue = [];
         break;
       }
@@ -237,6 +242,7 @@ const SIM = (() => {
 
   function retreat(G, sq) {
     const hq = hqOf(G, sq.owner); if (!hq) return;
+    if (sq.garrison != null) leaveHouse(G, sq, hq.x, hq.y);
     sq.retreating = true; sq.forceTarget = null; sq.buildQueue = [];
     sq.order = { type: 'retreat', x: hq.x + (sq.owner ? -9 : 9), y: hq.y + (sq.owner ? 9 : -9) };
     if (sq.crew) { sq.crew.state = 'packed'; }
@@ -389,9 +395,17 @@ const SIM = (() => {
     const ab = D.ABILITIES[o.id], P = G.players[e.owner];
     if (!ab || (e.cooldowns[o.id] || 0) > G.t) return;
     if (!canAfford(P, ab.cost)) { event(G, e.owner, 'error', 'Not enough munitions', e.x, e.y); return; }
+    if (o.id === 'breach') {
+      const h = MAP.houseAt(G.map, o.x, o.y, 1.5), occ = h && h.occ != null ? G.byId.get(h.occ) : null;
+      if (!h || !occ || occ.dead || occ.owner === e.owner) { event(G, e.owner, 'error', 'Breach: target a building the enemy holds', o.x, o.y); return; }
+      if (e.garrison != null) leaveHouse(G, e, h.x, h.y);
+      e.order = { type: 'ability', id: 'breach', x: h.x, y: h.y, house: h.id }; e.path = null; e.slots = null; e.forceTarget = null;
+      const d = doorOf(h, e.x, e.y); setPath(G, e, d.x, d.y); return;
+    }
     e.order = { type: 'ability', id: o.id, x: o.x, y: o.y }; e.path = null; e.slots = null; e.forceTarget = null;
   }
   function stepAbility(G, e, dt) {
+    if (e.order.id === 'breach') return stepBreach(G, e);
     const o = e.order, ab = D.ABILITIES[o.id], d = Math.hypot(o.x - e.x, o.y - e.y);
     if (ab.minRange && d < ab.minRange) { e.order = { type: 'idle' }; return; }
     if (o.id === 'barrage') {
@@ -407,6 +421,110 @@ const SIM = (() => {
     pay(G.players[e.owner], ab.cost); e.cooldowns[o.id] = G.t + ab.cooldown;
     COMBAT.throwGrenade(G, e, thrower, o.x, o.y, ab);
     e.order = { type: 'idle' };
+  }
+
+
+  /* ---------------- garrisons (CoH3: infantry occupy houses and fire out of every face; Breach clears them) ----------------
+     One squad per house. The men stand at window spots just outside the walls, spread over the four faces, so the
+     usual line-of-sight and targeting rules make each man fire out of his own side. Occupants count as in heavy
+     (garrison) cover. Explosions grind the house down; at zero it collapses into rubble and throws them out hurt. */
+  const GARRISON = { enterDist: 2.2, windowOut: .45, collapseDmg: 60, breachDmg: 40, breachSupp: .7 };
+  function houseSlots(h, n) {
+    const faces = [[1, 0], [0, 1], [-1, 0], [0, -1]], out = [];
+    const per = faces.map(([fx, fy]) => { const len = fx ? h.d : h.w, cnt = Math.max(1, Math.floor(len / 2.2)); return { fx, fy, len, cnt, used: 0 }; });
+    for (let k = 0; k < n; k++) {
+      const F = per[k % 4]; const i = F.used++ % F.cnt, t = (i + .5) / F.cnt - .5;
+      const ox = F.fx ? F.fx * (h.w / 2 + GARRISON.windowOut) : t * F.len, oy = F.fy ? F.fy * (h.d / 2 + GARRISON.windowOut) : t * F.len;
+      out.push({ x: h.x + ox, y: h.y + oy, a: Math.atan2(F.fy, F.fx) });
+    }
+    return out;
+  }
+  const houseOf = (G, sq) => sq.garrison != null ? G.map.houses[sq.garrison] : null;
+  function doorOf(h, x, y) {   // the point on the outside of the house nearest (x, y)
+    const dx = U.clamp(x, h.x - h.w / 2, h.x + h.w / 2), dy = U.clamp(y, h.y - h.d / 2, h.y + h.d / 2);
+    let px = dx, py = dy;
+    if (Math.abs(x - h.x) / h.w > Math.abs(y - h.y) / h.d) px = h.x + Math.sign(x - h.x || 1) * (h.w / 2 + 1); else py = h.y + Math.sign(y - h.y || 1) * (h.d / 2 + 1);
+    return { x: px, y: py };
+  }
+  function edgeDist(h, x, y) { const dx = Math.max(0, Math.abs(x - h.x) - h.w / 2), dy = Math.max(0, Math.abs(y - h.y) - h.d / 2); return Math.hypot(dx, dy); }
+  function canGarrison(sq) { return sq.type === 'squad' && !sq.retreating; }
+  function orderGarrison(G, sq, h) {
+    if (!h || h.dead) return;
+    if (h.occ != null && h.occ !== sq.id) { const o = G.byId.get(h.occ); if (o && !o.dead) { event(G, sq.owner, 'error', o.owner === sq.owner ? 'That building is already occupied' : 'Enemy inside: use Breach to clear it', h.x, h.y); return; } h.occ = null; }
+    if (sq.garrison === h.id) return;
+    if (sq.garrison != null) leaveHouse(G, sq, h.x, h.y);
+    if (sq.crew && sq.crew.state !== 'packed') teardown(G, sq);
+    sq.order = { type: 'garrison', house: h.id }; sq.forceTarget = null; sq.slots = null; sq.buildQueue = [];
+    const d = doorOf(h, sq.x, sq.y); setPath(G, sq, d.x, d.y);
+  }
+  function stepGarrisonOrder(G, sq) {
+    const h = G.map.houses[sq.order.house];
+    if (!h || h.dead || (h.occ != null && h.occ !== sq.id && G.byId.get(h.occ) && !G.byId.get(h.occ).dead)) { sq.order = { type: 'idle' }; return; }
+    if (sq.crew && sq.crew.state !== 'packed') return;   // packing up first
+    const al = sq.models.filter(m => m.alive); if (!al.length) return;
+    if (edgeDist(h, sq.x, sq.y) <= GARRISON.enterDist || al.some(m => edgeDist(h, m.x, m.y) <= 1.2)) enterHouse(G, sq, h);
+    else if (!sq.path || !sq.path.length) { const d = doorOf(h, sq.x, sq.y); setPath(G, sq, d.x, d.y); }
+  }
+  function enterHouse(G, sq, h) {
+    sq.garrison = h.id; h.occ = sq.id; sq.path = null; sq.order = { type: 'idle' }; sq.slots = null;
+    sq.x = h.x; sq.y = h.y; sq.moving = false;
+    placeInHouse(G, sq, h);
+    event(G, sq.owner, 'garrison', sq.def.name + ' garrisoned', h.x, h.y);
+  }
+  function placeInHouse(G, sq, h) {
+    const al = sq.models.filter(m => m.alive), slots = houseSlots(h, al.length);
+    al.forEach((m, k) => { m.x = slots[k].x; m.y = slots[k].y; m.heading = slots[k].a; m.aim = slots[k].a; m.vx = 0; m.inside = true; m.spath = null; m.goalX = null; });
+    sq.houseN = al.length;
+  }
+  function leaveHouse(G, sq, tx, ty) {
+    const h = houseOf(G, sq); if (!h) return;
+    if (h.occ === sq.id) h.occ = null;
+    sq.garrison = null;
+    const nav = MAP.navGrids(G.map).inf, d = doorOf(h, tx == null ? h.x + 1 : tx, ty == null ? h.y : ty);
+    const o = MAP.nearestOpen(nav, G.map, d.x, d.y); sq.x = o.x; sq.y = o.y;
+    const al = sq.models.filter(m => m.alive);
+    al.forEach((m, k) => { const p = MAP.nearestOpen(nav, G.map, o.x + ((k % 3) - 1) * 1.1, o.y + (Math.floor(k / 3) - .5) * 1.1); m.x = p.x; m.y = p.y; m.inside = false; });
+    sq.slots = null;
+  }
+  function stepGarrisoned(G, sq, dt) {
+    const h = houseOf(G, sq);
+    if (!h || h.dead) { sq.garrison = null; for (const m of sq.models) m.inside = false; return; }
+    const n = sq.models.filter(m => m.alive).length;
+    if (n !== sq.houseN) placeInHouse(G, sq, h);
+    for (const m of sq.models) if (m.alive) m.vx = 0;
+    sq.moving = false; sq.stillT += dt; sq.path = null;
+  }
+  /* house damage: explosions and shells; collapse ejects and hurts the occupants */
+  function damageHouse(G, h, dmg, src) {
+    if (!h || h.dead) return;
+    h.hp -= dmg; h.hitT = G.t;
+    if (h.hp > 0) return;
+    const occ = h.occ != null ? G.byId.get(h.occ) : null;
+    MAP.collapseHouse(G.map, h);
+    G.fx.push({ kind: 'boom', x: h.x, y: h.y, t: G.t, big: 2.2, life: 2 });
+    if (occ && !occ.dead) {
+      occ.garrison = null;
+      leaveHouse(G, Object.assign(occ, { garrison: h.id }), occ.owner ? h.x - 5 : h.x + 5, occ.owner ? h.y + 5 : h.y - 5);
+      h.occ = null;
+      for (const m of occ.models) if (m.alive) COMBAT.damageModel(G, occ, m, GARRISON.collapseDmg, src);
+      event(G, occ.owner, 'lost', 'Building collapsed on ' + occ.def.name + '!', h.x, h.y);
+    }
+  }
+  /* Breach: grenades through the door; the garrison is thrown out hurt and suppressed, the breachers take the house */
+  function stepBreach(G, e) {
+    const o = e.order, ab = D.ABILITIES.breach, h = G.map.houses[o.house];
+    const occ = h && h.occ != null ? G.byId.get(h.occ) : null;
+    if (!h || h.dead || !occ || occ.dead || occ.owner === e.owner) { e.order = { type: 'idle' }; if (h && !h.dead && !occ) orderGarrison(G, e, h); return; }
+    if (edgeDist(h, e.x, e.y) > GARRISON.enterDist + .5) { if (!e.path || !e.path.length) { const d = doorOf(h, e.x, e.y); setPath(G, e, d.x, d.y); } return; }
+    if (!canAfford(G.players[e.owner], ab.cost)) { e.order = { type: 'idle' }; event(G, e.owner, 'error', 'Not enough munitions', e.x, e.y); return; }
+    pay(G.players[e.owner], ab.cost); e.cooldowns.breach = G.t + ab.cooldown;
+    G.fx.push({ kind: 'boom', x: h.x, y: h.y, t: G.t, big: .9, life: 1 });
+    leaveHouse(G, occ, occ.x + (h.x - e.x) * 2, occ.y + (h.y - e.y) * 2);   // out of the far side
+    for (const m of occ.models) if (m.alive) COMBAT.damageModel(G, occ, m, GARRISON.breachDmg, e);
+    occ.supp = Math.max(occ.supp, GARRISON.breachSupp);
+    event(G, occ.owner, 'lost', occ.def.name + ' breached and forced out!', h.x, h.y);
+    e.order = { type: 'idle' };
+    enterHouse(G, e, h);
   }
 
   /* ---------------- movement ---------------- */
@@ -674,7 +792,7 @@ const SIM = (() => {
       const rate = [0, 0];
       for (const e of G.ents) {
         if (e.dead || e.owner < 0 || e.type === 'building') continue;
-        if (e.type === 'squad' && (e.retreating || !e.models.some(m => m.alive) || e.suppState === 2)) continue;
+        if (e.type === 'squad' && (e.retreating || e.garrison != null || !e.models.some(m => m.alive) || e.suppState === 2)) continue;
         const mult = e.type === 'squad' ? (e.def.capture || 1) : (e.def.capture || 0);
         if (!mult) continue;
         if (U.dist2(e.x, e.y, p.x, p.y) > p.radius * p.radius) continue;
@@ -773,7 +891,8 @@ const SIM = (() => {
         else if (e.order.type === 'repair') stepRepair(G, e, dt);
         else e.building = false;
         if (e.order.type === 'ability') stepAbility(G, e, dt);
-        stepSquadMove(G, e, dt);
+        if (e.order.type === 'garrison') stepGarrisonOrder(G, e);
+        if (e.garrison != null) stepGarrisoned(G, e, dt); else stepSquadMove(G, e, dt);
         stepSquadSupport(G, e, dt);
       } else if (e.type === 'vehicle') {
         stepVehicleMove(G, e, dt);
@@ -794,6 +913,7 @@ const SIM = (() => {
   function kill(G, e) {
     if (e.dead) return;
     e.dead = true; e.reap = G.t + .1; e.deadT = G.t;
+    if (e.type === 'squad' && e.garrison != null) { const h = G.map.houses[e.garrison]; if (h && h.occ === e.id) h.occ = null; }
     if (e.type === 'building') { stampBuilding(G, e, false); G.fx.push({ kind: 'boom', x: e.x, y: e.y, t: G.t, big: 2 }); if (e.def.cost) { const still = G.ents.some(b => b !== e && !b.dead && b.type === 'building' && b.owner === e.owner && b.defId === e.defId); if (!still) G.players[e.owner].built.delete(e.defId); } }
     if (e.type === 'vehicle') {
       G.wrecks = G.wrecks || [];
@@ -807,7 +927,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, standPlan, threatDir, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, standPlan, threatDir, damageHouse, houseOf, GARRISON, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, canCapture, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
