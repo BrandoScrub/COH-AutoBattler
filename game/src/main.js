@@ -27,10 +27,23 @@ const MAIN = (() => {
     HUD.ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
     resize();
     inMenu = false;
+    applyLayout.zoomed = false; applyLayout();
     HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
     if (!running) { running = true; last = performance.now(); requestAnimationFrame(loop); }
   }
-  function resize() { const c = $('#view'); c.width = innerWidth; c.height = innerHeight; RENDER.resize(innerWidth, innerHeight, 1); }
+  /* touch mode: chosen in the menu, or automatic for coarse pointers and small screens */
+  let ctl = 'auto', rotOk = false;
+  try { ctl = localStorage.getItem('tw2-ctl') || 'auto'; } catch (e) {}
+  const isTouch = () => ctl === 'touch' || (ctl === 'auto' && ((matchMedia && matchMedia('(pointer: coarse)').matches) || Math.min(innerWidth, innerHeight) < 500));
+  function applyLayout() {
+    const m = isTouch(), b = document.body;
+    b.classList.toggle('mobile', m);
+    b.classList.toggle('portrait', m && innerHeight > innerWidth && !rotOk);
+    const s = m ? Math.min(1, innerWidth / 1060, innerHeight / 640) : 1;
+    document.documentElement.style.setProperty('--s', Math.max(.45, s).toFixed(3));
+    if (m && RENDER.cam && G && !applyLayout.zoomed) { RENDER.cam.k = .8; applyLayout.zoomed = true; }
+  }
+  function resize() { const c = $('#view'); c.width = innerWidth; c.height = innerHeight; RENDER.resize(innerWidth, innerHeight, 1); applyLayout(); }
   addEventListener('resize', resize);
 
   function loop(now) {
@@ -68,6 +81,10 @@ const MAIN = (() => {
     $('#quit').addEventListener('click', () => { menu(false); $('#menu').classList.remove('hide'); inMenu = true; });
     $('#again').addEventListener('click', () => { $('#end').classList.add('hide'); $('#menu').classList.remove('hide'); inMenu = true; });
     $('#speed').addEventListener('change', ev => { speed = +ev.target.value; });
+    $('#ctl').value = ctl;
+    $('#ctl').addEventListener('change', ev => { ctl = ev.target.value; try { localStorage.setItem('tw2-ctl', ctl); } catch (e) {} applyLayout(); });
+    $('#rotok').addEventListener('click', () => { rotOk = true; applyLayout(); });
+    applyLayout();
     boot();
   });
   return { menu, inMenu: () => inMenu, start };

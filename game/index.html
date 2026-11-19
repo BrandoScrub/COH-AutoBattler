@@ -114,6 +114,24 @@
   .side h3 { margin: 0 0 4px; font: 700 18px Inter; } .side.us h3 { color: var(--us); } .side.de h3 { color: var(--de); } .side p { margin: 0; color: var(--dim); font-size: 13px; }
   .controls { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 12.5px; color: var(--dim); } .controls b { color: var(--text); font-weight: 600; }
   .bigbtn { padding: 10px 22px; border: 1px solid #000; background: linear-gradient(#5a4a2a, #3a2f1a); box-shadow: inset 0 0 0 1px #c9a050; cursor: pointer; font-weight: 700; margin-right: 8px; }
+  /* ---- touch / phone mode: body.mobile, HUD drawn at --s scale ---- */
+  .tbar { display: none; }
+  body.mobile .ticker, body.mobile .roster, body.mobile .mmwrap, body.mobile .bgstrip, body.mobile .bottom, body.mobile .alerts, body.mobile .tbar { zoom: var(--s, 1); }
+  body.mobile .bottom { grid-template-columns: 300px 40px 276px; }
+  body.mobile .resrow { grid-column: 1 / 3; grid-template-columns: 1fr 1fr 1fr .9fr; } body.mobile .res { grid-template-columns: 22px 1fr; padding: 2px 5px; } body.mobile .res i { width: 20px; height: 20px; }
+  body.mobile .card { grid-template-columns: repeat(4, 64px); grid-auto-rows: 58px; }
+  body.mobile .panel { grid-template-columns: 76px 1fr; gap: 8px; } body.mobile .portrait { width: 76px; height: 76px; }
+  body.mobile .pbody .weap, body.mobile .pbody .armor, body.mobile .pbody .note, body.mobile .pbody .own { display: none; }
+  body.mobile .pbody h3 { font-size: 15px; } body.mobile .alerts { bottom: 330px; width: 240px; }
+  body.mobile .mmbtns .logo { display: none; } body.mobile .bgstrip { bottom: 250px; }
+  body.mobile .tip { right: 8px; bottom: auto; top: 60px; }
+  body.mobile .tbar { display: flex; position: absolute; left: 8px; top: 8px; gap: 5px; }
+  .tbar button { width: 52px; height: 48px; border: 1px solid #000; background: linear-gradient(#3a3b37, #222320); box-shadow: inset 0 0 0 1px #555; font-size: 18px; line-height: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
+  .tbar button small { font: 600 10px Inter, system-ui; color: var(--dim); } .tbar button.on { box-shadow: inset 0 0 0 2px var(--gold); background: linear-gradient(#5a4a2a, #3a2f1a); }
+  .box { max-height: 92vh; overflow: auto; }
+  body.mobile .controls .desk { display: none; } .controls .touch { display: none; } body.mobile .controls .touch { display: contents; }
+  #rotate { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; background: #0c0c0bf2; text-align: center; padding: 24px; }
+  body.mobile.portrait #rotate { display: grid; } #rotate .ph { font-size: 54px; display: inline-block; transform: rotate(90deg); margin-bottom: 10px; }
   #loadstatus { color: var(--dim); font-size: 12px; margin-top: 10px; }
   .speedrow { margin-top: 12px; font-size: 12px; color: var(--dim); } .speedrow select { background: #111; color: #ddd; border: 1px solid #555; }
 </style>
@@ -131,18 +149,23 @@
       <button class="side de" id="start2" disabled><h3>Wehrmacht</h3><p>Place buildings from the HQ, Pioneers raise them. Grenadiers, MG 42s, Panzergrenadiers, StuG and Panzer IV.</p></button>
     </div>
     <div class="controls">
-      <b>Left click / drag</b><span>select; double-click selects that kind on screen; Shift adds</span>
+      <span class="touch"><b>Tap</b><span>select your unit; with units selected, tap ground to move or an enemy to attack</span>
+      <b>Long-press</b><span>attack-move there; long-press a command button to read it</span>
+      <b>Drag / pinch</b><span>pan / zoom the camera; tap the minimap to jump</span>
+      <b>Toolbar</b><span>Box: drag to select several &middot; Add: taps add to the selection &middot; Clear &middot; HQ &middot; Full screen</span></span>
+      <span class="desk" style="display:contents"><b>Left click / drag</b><span>select; double-click selects that kind on screen; Shift adds</span>
       <b>Right click</b><span>move, or attack what is under the cursor; right-drag sets the facing (team weapons set up that way)</span>
       <b>Q W E R</b><span>top row: attack-move, stop, reverse (vehicles), retreat</span>
       <b>A S D F &middot; Z X C V</b><span>abilities, set-up facing, upgrades, construction; on buildings the units they produce</span>
       <b>Ctrl + 1-9, 1-9</b><span>assign and recall control groups; press twice to jump there</span>
       <b>Space</b><span>tactical pause (orders still work)</span>
-      <b>Arrows, screen edge, middle drag, wheel</b><span>camera; Home jumps to your HQ</span>
+      <b>Arrows, screen edge, middle drag, wheel</b><span>camera; Home jumps to your HQ</span></span>
     </div>
-    <div class="speedrow">Game speed <select id="speed"><option value="1">normal</option><option value="1.5">1.5x</option><option value="2">2x</option></select></div>
+    <div class="speedrow">Controls <select id="ctl"><option value="auto">auto</option><option value="touch">touch / phone</option><option value="desk">mouse and keyboard</option></select> &nbsp; Game speed <select id="speed"><option value="1">normal</option><option value="1.5">1.5x</option><option value="2">2x</option></select></div>
     <div id="loadstatus">Loading…</div>
   </div>
 </div>
+<div id="rotate"><div><div class="ph">&#128241;</div><h2>Turn your phone sideways</h2><p class="sub">The battlefield and HUD need landscape.</p><button class="bigbtn" id="rotok">Play in portrait anyway</button></div></div>
 <div id="pausemenu" class="screen hide"><div class="box"><h2>Paused</h2><p class="sub">The match is stopped while this menu is open.</p><button class="bigbtn" id="resume">Resume</button><button class="bigbtn" id="quit">Quit to menu</button></div></div>
 <div id="end" class="screen hide"><div class="box"><h2>Victory</h2><p class="sub"></p><button class="bigbtn" id="again">Back to menu</button></div></div>
 

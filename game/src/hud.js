@@ -82,7 +82,10 @@ const HUD = (() => {
     for (let i = 0; i < 12; i++) {
       const b = h('button', 'slot', `<img><span class="k">${KEYS[i]}</span><span class="cd"></span><span class="cost"></span>`);
       b.addEventListener('click', () => pressSlot(i));
-      b.addEventListener('mouseenter', () => showTip(i, b)); b.addEventListener('mouseleave', hideTip);
+      b.addEventListener('mouseenter', () => { if (!ui.touch) showTip(i, b); }); b.addEventListener('mouseleave', () => { if (!ui.touch) hideTip(); });
+      b.addEventListener('pointerdown', ev => { if (ev.pointerType !== 'touch') return; clearTimeout(b._lp); b._lpDone = false; b._lp = setTimeout(() => { b._lpDone = true; showTip(i, b); }, 450); });
+      b.addEventListener('pointerup', ev => { if (ev.pointerType !== 'touch') return; clearTimeout(b._lp); if (b._lpDone) setTimeout(hideTip, 1600); });
+      b.addEventListener('click', ev => { if (b._lpDone) { ev.stopImmediatePropagation(); b._lpDone = false; } }, true);
       el.card.appendChild(b); cardSlots.push(b);
     }
     el.mm.querySelectorAll('.mmbtns button').forEach(b => b.addEventListener('click', () => mmButton(b.dataset.a)));
@@ -91,7 +94,7 @@ const HUD = (() => {
     el.alerts.addEventListener('click', ev => { const t = ev.target.closest('[data-x]'); if (t) { RENDER.cam.x = +t.dataset.x; RENDER.cam.y = +t.dataset.y; } });
     el.bottom.querySelector('.slotcol').addEventListener('click', ev => { const t = ev.target.closest('[data-act]'); if (t) slotColAct(t.dataset.act); });
     el.bottom.querySelector('.panel').addEventListener('click', ev => { const t = ev.target.closest('[data-q]'); if (t) { const b = primary(); if (b && b.type === 'building') SIM.issue(G, [b.id], { type: 'cancel', index: +t.dataset.q }); } });
-    bindInput();
+    bindInput(); bindTouch();
   }
   function glyphIcon(gl) { return icon('g:' + gl, g => { g.scale(1.5, 1.5); (RENDER.GLYPHS[gl])(g); }, 36, 36); }
 
@@ -321,6 +324,8 @@ const HUD = (() => {
     const corners = [[0, 0], [RENDER.W, 0], [RENDER.W, RENDER.H - 230], [0, RENDER.H - 230]].map(([x, y]) => RENDER.toWorld(x, y)).map(([x, y]) => mmToScreen(x, y));
     g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1.2; g.beginPath(); corners.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
   }
+  /* event position on the minimap in canvas pixels, whatever size the HUD is drawn at */
+  function mmEventWorld(e) { const r = el.mmc.getBoundingClientRect(); return mmToWorld((e.clientX - r.left) * el.mmc.width / r.width, (e.clientY - r.top) * el.mmc.height / r.height); }
   function mmButton(a) {
     if (a === 'selv') ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'vehicle' && !e.dead).map(e => e.id));
     else if (a === 'seli') ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad' && !e.dead).map(e => e.id));
@@ -333,7 +338,7 @@ const HUD = (() => {
   /* ---------------- input ---------------- */
   const mouse = { x: -1, y: -1, down: false, drag: null, rdown: null, inCanvas: false, moved: false };
   function entAt(sx, sy) {
-    let best = null, bd = 30 * 30;
+    let best = null, bd = ui.touch ? 46 * 46 : 30 * 30;
     for (const e of G.ents) {
       if (e.dead) continue;
       if (e.owner !== 0 && e.type !== 'building' && !FOG.visible(G, 0, e)) continue;
@@ -366,11 +371,11 @@ const HUD = (() => {
     });
     canvasEl.addEventListener('wheel', e => { e.preventDefault(); const before = RENDER.toWorld(e.clientX, e.clientY); RENDER.cam.k *= e.deltaY < 0 ? 1.1 : 1 / 1.1; RENDER.clampCam(G); const after = RENDER.toWorld(e.clientX, e.clientY); RENDER.cam.x += before[0] - after[0]; RENDER.cam.y += before[1] - after[1]; }, { passive: false });
     el.mmc.addEventListener('mousedown', e => {
-      const r = el.mmc.getBoundingClientRect(), [wx, wy] = mmToWorld(e.clientX - r.left, e.clientY - r.top);
+      const [wx, wy] = mmEventWorld(e);
       if (e.button === 0) { RENDER.cam.x = wx; RENDER.cam.y = wy; mouse.mmDrag = true; }
       if (e.button === 2) { const ids = selEnts().filter(s => s.owner === 0).map(s => s.id); if (ids.length) SIM.issue(G, ids, { type: 'move', x: wx, y: wy }, e.shiftKey); }
     });
-    el.mmc.addEventListener('mousemove', e => { if (mouse.mmDrag && e.buttons & 1) { const r = el.mmc.getBoundingClientRect(), [wx, wy] = mmToWorld(e.clientX - r.left, e.clientY - r.top); RENDER.cam.x = wx; RENDER.cam.y = wy; } });
+    el.mmc.addEventListener('mousemove', e => { if (mouse.mmDrag && e.buttons & 1) { const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; } });
     window.addEventListener('mouseup', () => { mouse.mmDrag = false; });
     window.addEventListener('keydown', keyDown);
     document.addEventListener('mouseleave', () => { mouse.inCanvas = false; });
@@ -448,13 +453,97 @@ const HUD = (() => {
   }
   function marker(x, y, col) { G.fx.push({ kind: 'order', x, y, t: G.t, life: .8, col }); }
 
+  /* ---------------- touch: tap to select or order, drag to pan, pinch to zoom, long-press to attack-move ---------------- */
+  const touch = { pts: new Map(), start: null, moved: false, pinch: null, lastTap: 0 };
+  function fake(x, y, shift) { return { clientX: x, clientY: y, shiftKey: !!shift, target: canvasEl }; }
+  function tapAt(x, y) {
+    const m = ui.mode;
+    if (m) {
+      if (m.type === 'line' && !m.start) { const [wx, wy] = RENDER.toWorld(x, y); m.start = { x: wx, y: wy }; flash('Tap where the line ends'); return; }
+      mouse.drag = null; leftUp(fake(x, y)); return;
+    }
+    const t = entAt(x, y), mine = selEnts().filter(s => s.owner === 0);
+    if (t && t.owner === 0 && !(mine.length && mine.some(s => s.def && s.def.builder) && t.type !== 'squad' && (t.hp < t.maxHp || t.built < 1) && !ui.multi)) { mouse.drag = null; leftUp(fake(x, y, ui.multi)); return; }
+    if (mine.length && mine[0].type !== 'building' || mine.length && mine[0].type === 'building' && !t) { rightUp(fake(x, y)); return; }
+    mouse.drag = null; leftUp(fake(x, y));
+  }
+  function longPressAt(x, y) {
+    const ids = selEnts().filter(s => s.owner === 0 && s.type !== 'building').map(s => s.id); if (!ids.length) return;
+    const [wx, wy] = RENDER.toWorld(x, y); SIM.issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move');
+  }
+  function bindTouch() {
+    canvasEl.style.touchAction = 'none';
+    canvasEl.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'touch') return;
+      e.preventDefault(); ui.touch = true;
+      touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touch.pts.size === 1) {
+        touch.start = { x: e.clientX, y: e.clientY, t: performance.now(), cx: RENDER.cam.x, cy: RENDER.cam.y }; touch.moved = false;
+        clearTimeout(touch.lp); touch.lp = setTimeout(() => { if (!touch.moved && touch.pts.size === 1) { touch.longed = true; longPressAt(touch.start.x, touch.start.y); } }, 550); touch.longed = false;
+        if (ui.boxMode) { mouse.down = true; mouse.drag = { x: e.clientX, y: e.clientY, shift: ui.multi }; mouse.x = e.clientX; mouse.y = e.clientY; }
+      } else if (touch.pts.size === 2) {
+        clearTimeout(touch.lp); mouse.down = false; mouse.drag = null;
+        const [a, b] = [...touch.pts.values()];
+        touch.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: RENDER.cam.k, mid: RENDER.toWorld((a.x + b.x) / 2, (a.y + b.y) / 2) };
+        touch.moved = true;
+      }
+    });
+    canvasEl.addEventListener('pointermove', e => {
+      if (e.pointerType !== 'touch' || !touch.pts.has(e.pointerId)) return;
+      touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touch.pts.size >= 2 && touch.pinch) {
+        const [a, b] = [...touch.pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+        RENDER.cam.k = touch.pinch.k * d / Math.max(10, touch.pinch.d); RENDER.clampCam(G);
+        const now = RENDER.toWorld((a.x + b.x) / 2, (a.y + b.y) / 2);
+        RENDER.cam.x += touch.pinch.mid[0] - now[0]; RENDER.cam.y += touch.pinch.mid[1] - now[1];
+        return;
+      }
+      const s = touch.start; if (!s) return;
+      if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10) { touch.moved = true; clearTimeout(touch.lp); }
+      if (!touch.moved) return;
+      if (ui.boxMode) { mouse.x = e.clientX; mouse.y = e.clientY; return; }
+      const k = RENDER.cam.k, dx = (e.clientX - s.x) / (22 * k), dy = (e.clientY - s.y) / (11 * k);
+      RENDER.cam.x = s.cx - (dx + dy) / 2; RENDER.cam.y = s.cy - (dy - dx) / 2; RENDER.clampCam(G);
+    });
+    const end = e => {
+      if (e.pointerType !== 'touch' || !touch.pts.has(e.pointerId)) return;
+      touch.pts.delete(e.pointerId); clearTimeout(touch.lp);
+      if (touch.pts.size) { const [p] = [...touch.pts.values()]; touch.start = { x: p.x, y: p.y, t: 0, cx: RENDER.cam.x, cy: RENDER.cam.y }; touch.pinch = null; return; }
+      touch.pinch = null;
+      if (ui.boxMode && mouse.drag) { if (touch.moved) leftUp(fake(e.clientX, e.clientY, ui.multi)); mouse.down = false; mouse.drag = null; if (touch.moved) { ui.boxMode = false; syncToolbar(); return; } }
+      if (e.type === 'pointerup' && !touch.moved && !touch.longed && touch.start) tapAt(touch.start.x, touch.start.y);
+      touch.start = null;
+    };
+    canvasEl.addEventListener('pointerup', end); canvasEl.addEventListener('pointercancel', end);
+    // minimap: tap moves the camera, tap with units selected after a tap on the camera does not order (use the field)
+    el.mmc.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') return; e.preventDefault(); ui.touch = true; const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; el.mmc._drag = true; });
+    el.mmc.addEventListener('pointermove', e => { if (e.pointerType !== 'touch' || !el.mmc._drag) return; const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; });
+    el.mmc.addEventListener('pointerup', () => { el.mmc._drag = false; });
+    el.mmc.style.touchAction = 'none';
+    // touch toolbar
+    el.tbar = h('div', 'tbar', `<button data-t="box" title="Box select: drag on the field">&#9634;<small>Box</small></button><button data-t="multi" title="Add to selection">+<small>Add</small></button><button data-t="clear" title="Deselect">&#10005;<small>Clear</small></button><button data-t="hq" title="Jump to HQ">&#8962;<small>HQ</small></button><button data-t="full" title="Full screen">&#9974;<small>Full</small></button>`);
+    $('#hud').appendChild(el.tbar);
+    el.tbar.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-t]'); if (!b) return;
+      const t = b.dataset.t;
+      if (t === 'box') ui.boxMode = !ui.boxMode;
+      else if (t === 'multi') ui.multi = !ui.multi;
+      else if (t === 'clear') { ui.selected.clear(); ui.mode = null; ui.page = 'main'; }
+      else if (t === 'hq') centreOn(SIM.hqOf(G, 0));
+      else if (t === 'full') { try { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else (d.requestFullscreen || d.webkitRequestFullscreen).call(d).catch(() => flash('Full screen is not allowed here')); } catch (x) { flash('Full screen is not allowed here'); } }
+      syncToolbar();
+    });
+    syncToolbar();
+  }
+  function syncToolbar() { if (!el.tbar) return; el.tbar.querySelector('[data-t=box]').classList.toggle('on', !!ui.boxMode); el.tbar.querySelector('[data-t=multi]').classList.toggle('on', !!ui.multi); }
+
   /* per-frame input work: edge pan, arrow keys, hover, ghosts, cover preview */
   function tick(dt) {
     const c = RENDER.cam, sp = 60 / c.k * dt;
     let dx = 0, dy = 0;
     if (keys.has('ArrowLeft')) dx -= 1; if (keys.has('ArrowRight')) dx += 1; if (keys.has('ArrowUp')) dy -= 1; if (keys.has('ArrowDown')) dy += 1;
     const edge = 6;
-    if (mouse.moved && mouse.inCanvas && document.hasFocus()) { if (mouse.x < edge) dx -= 1; if (mouse.x > RENDER.W - edge) dx += 1; if (mouse.y < edge) dy -= 1; if (mouse.y > RENDER.H - edge) dy += 1; }
+    if (!ui.touch && mouse.moved && mouse.inCanvas && document.hasFocus()) { if (mouse.x < edge) dx -= 1; if (mouse.x > RENDER.W - edge) dx += 1; if (mouse.y < edge) dy -= 1; if (mouse.y > RENDER.H - edge) dy += 1; }
     if (dx || dy) { c.x += (dx + dy) * sp * .5; c.y += (dy - dx) * sp * .5; }
     RENDER.clampCam(G);
     const t = mouse.inCanvas ? entAt(mouse.x, mouse.y) : null; ui.hover = t ? t.id : null;
