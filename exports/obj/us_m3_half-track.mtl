@@ -1,0 +1,26 @@
+newmtl hair
+Kd 0.408 0.424 0.267
+newmtl hull
+Kd 0.408 0.424 0.267
+newmtl rubber
+Kd 0.157 0.157 0.157
+newmtl skin
+Kd 0.839 0.659 0.518
+newmtl steel
+Kd 0.243 0.251 0.235
+newmtl us_boot
+Kd 0.408 0.424 0.267
+newmtl us_brass
+Kd 0.408 0.424 0.267
+newmtl us_canvas
+Kd 0.408 0.424 0.267
+newmtl us_helmet
+Kd 0.408 0.424 0.267
+newmtl us_leather
+Kd 0.408 0.424 0.267
+newmtl us_puttee
+Kd 0.408 0.424 0.267
+newmtl us_trousers
+Kd 0.408 0.424 0.267
+newmtl us_tunic
+Kd 0.408 0.424 0.267

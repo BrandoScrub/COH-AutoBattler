@@ -1,0 +1,26 @@
+newmtl blanket
+Kd 0.471 0.439 0.314
+newmtl boot
+Kd 0.251 0.180 0.133
+newmtl brass
+Kd 0.471 0.424 0.275
+newmtl canvas
+Kd 0.588 0.541 0.376
+newmtl hair
+Kd 0.408 0.424 0.267
+newmtl helmet
+Kd 0.290 0.322 0.212
+newmtl leather
+Kd 0.392 0.267 0.165
+newmtl puttee
+Kd 0.627 0.580 0.424
+newmtl skin
+Kd 0.839 0.659 0.518
+newmtl steel
+Kd 0.243 0.251 0.235
+newmtl trousers
+Kd 0.471 0.431 0.298
+newmtl tunic
+Kd 0.541 0.502 0.345
+newmtl wood
+Kd 0.439 0.282 0.165

@@ -1,0 +1,24 @@
+newmtl de_boot
+Kd 0.714 0.612 0.400
+newmtl de_brass
+Kd 0.714 0.612 0.400
+newmtl de_canvas
+Kd 0.714 0.612 0.400
+newmtl de_helmet
+Kd 0.714 0.612 0.400
+newmtl de_leather
+Kd 0.714 0.612 0.400
+newmtl de_trousers
+Kd 0.714 0.612 0.400
+newmtl de_tunic
+Kd 0.714 0.612 0.400
+newmtl hair
+Kd 0.714 0.612 0.400
+newmtl hull
+Kd 0.714 0.612 0.400
+newmtl rubber
+Kd 0.173 0.173 0.173
+newmtl skin
+Kd 0.839 0.659 0.518
+newmtl steel
+Kd 0.329 0.314 0.275

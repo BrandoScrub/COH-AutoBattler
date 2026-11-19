@@ -14,6 +14,8 @@ styles/ww2/        the game's artkit style pack
 art/               the exports: assets.json, pack/ pages, crew_layout.json (committed: the game ships its art)
 tools/             build, check, preview and engine-update scripts (below)
 docs/previews/     review GIFs and sheets drawn from art/
+docs/sheets/       grey and colour review sheets of every vehicle and squad, play-size line-up (tools/build.py)
+exports/obj/       every vehicle and squad as OBJ + MTL (metres, y up, flat colours) for other 3D tools (tools/build.py)
 ```
 
 ## Commands (from the repository root; Python 3 with numpy, scipy and Pillow)
@@ -22,7 +24,8 @@ docs/previews/     review GIFs and sheets drawn from art/
   Everything takes about an hour on two processes; the 16-heading tanks are 6 to 12 minutes each.
 - `python3 tools/list_units.py`: the unit table below (paste it in after an export that changes keys or clips).
 - `python3 tools/preview_units.py art docs/previews`, `tools/preview_teams.py`, `tools/preview_turn.py`: review pictures from `art/`.
-- `python3 tools/build.py <out>`: grey review sheets of every vehicle and squad and an OBJ + MTL per model.
+- `python3 tools/build.py <out>`: grey review sheets of every vehicle and squad and an OBJ + MTL per model
+  (what is in `docs/sheets/` and `exports/obj/`; rebuild into a scratch folder and copy over after changing a model).
 - `python3 tools/update_artkit.py <engine checkout>`: re-pin the engine; `--verify` checks the pinned copy.
 
 A new unit: model it in `models/` (brief first, `check()` empty), add it to `roster.py` and an entry in `data/units.json`,

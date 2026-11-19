@@ -1,0 +1,6 @@
+newmtl hull
+Kd 0.408 0.424 0.267
+newmtl rubber
+Kd 0.157 0.157 0.157
+newmtl steel
+Kd 0.243 0.251 0.235

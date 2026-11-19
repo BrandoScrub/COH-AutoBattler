@@ -1,0 +1,8 @@
+newmtl exhaust
+Kd 0.714 0.612 0.400
+newmtl hull
+Kd 0.714 0.612 0.400
+newmtl rubber
+Kd 0.173 0.173 0.173
+newmtl steel
+Kd 0.329 0.314 0.275
