@@ -9,8 +9,18 @@ const RENDER = (() => {
   const R = { opt: { shadows: true, corpses: true }, cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
 
   /* ---------------- camera ---------------- */
-  function toScreen(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
-  function toWorld(sx, sy) { const c = R.cam, k = c.k; const a = (sx - R.W / 2) / (PXM * k) + (c.x - c.y), b = (sy - R.H / 2) / (PXM * .5 * k) + (c.x + c.y); return [(a + b) / 2, (b - a) / 2]; }
+  /* world (x, y) and a height z above the ground there -> screen. The terrain height is added, so everything placed on
+     the ground sits on the hills; toScreenFlat ignores terrain (for the ground and fog transforms). */
+  const hGround = (x, y) => R.G && R.G.map && R.G.map.hgt ? MAP.hAt(R.G.map, x, y) : 0;
+  function toScreenFlat(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
+  function toScreen(x, y, z) { return toScreenFlat(x, y, (z || 0) + hGround(x, y)); }
+  function toWorldFlat(sx, sy) { const c = R.cam, k = c.k; const a = (sx - R.W / 2) / (PXM * k) + (c.x - c.y), b = (sy - R.H / 2) / (PXM * .5 * k) + (c.x + c.y); return [(a + b) / 2, (b - a) / 2]; }
+  /* screen -> the ground point drawn there (a few fixed-point steps over the terrain) */
+  function toWorld(sx, sy) {
+    let p = toWorldFlat(sx, sy);
+    for (let i = 0; i < 4; i++) p = toWorldFlat(sx, sy + hGround(p[0], p[1]) * VZ * R.cam.k);
+    return p;
+  }
   function clampCam(G) { const c = R.cam; c.x = U.clamp(c.x, 5, G.map.w - 5); c.y = U.clamp(c.y, 5, G.map.h - 5); c.k = U.clamp(c.k, ZOOM_MIN, 1.6); }
 
   /* ---------------- one-off art: ground texture, trees, props, icons ---------------- */
@@ -35,12 +45,29 @@ const RENDER = (() => {
       const im = new Image(); im.onload = () => { R.tiles[n] = im; res(); }; im.onerror = () => res(); im.src = base + n + '.jpg';
     })));
   }
+  /* hill shading and faint contour lines baked over the ground texture, so slopes read at a glance */
+  function shadeGround(G, ground, S) {
+    const m = G.map; if (!m.hgt) return;
+    const P = 3, W = m.w * P, H = m.h * P, sc = canvas(W, H), sg = sc.getContext('2d'), img = sg.createImageData(W, H), d = img.data;
+    const L = [-.55, -.35, .76], Ln = Math.hypot(...L), lx = L[0] / Ln, ly = L[1] / Ln, lz = L[2] / Ln, flat = lz;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const wx = (x + .5) / P, wy = (y + .5) / P, h = MAP.hAt(m, wx, wy);
+      const dx = (MAP.hAt(m, wx + .5, wy) - MAP.hAt(m, wx - .5, wy)), dy = (MAP.hAt(m, wx, wy + .5) - MAP.hAt(m, wx, wy - .5));
+      const n = Math.hypot(dx, dy, 1), lum = (-dx * lx - dy * ly + lz) / n / flat;
+      const i = (y * W + x) * 4, g = U.clamp(128 + (lum - 1) * 150, 70, 180);
+      // a contour every 1.5 m
+      const band = Math.floor(h / 1.5), edge = h > .3 && (Math.floor(MAP.hAt(m, wx + .34, wy) / 1.5) !== band || Math.floor(MAP.hAt(m, wx, wy + .34) / 1.5) !== band);
+      d[i] = d[i + 1] = d[i + 2] = edge ? g - 16 : g; d[i + 3] = 255;
+    }
+    sg.putImageData(img, 0, 0);
+    const g2 = ground.getContext('2d'); g2.save(); g2.globalCompositeOperation = 'soft-light'; g2.imageSmoothingEnabled = true; g2.drawImage(sc, 0, 0, ground.width, ground.height); g2.restore();
+  }
   function buildGround(G) {
     // the ground depends only on the map, so a second match on the same map reuses it
     if (R.ground && R.groundKey === G.map.seed + ':' + G.map.w) return;
     R.groundKey = G.map.seed + ':' + G.map.w;
-    if (!R.tiles.ground_dry_grass) { R.groundS = 8; return buildGroundFlat(G); }
-    buildGroundPainted(G);
+    if (!R.tiles.ground_dry_grass) { R.groundS = 8; buildGroundFlat(G); } else buildGroundPainted(G);
+    shadeGround(G, R.ground, R.groundS);
   }
   function buildGroundPainted(G) {
     const m = G.map, S = R.groundS = 12, W = m.w * S, H = m.h * S, c = canvas(W, H), g = c.getContext('2d');
@@ -230,6 +257,7 @@ const RENDER = (() => {
 
   /* ---------------- per-frame ---------------- */
   function init(canvasEl, lib, G) {
+    R.G = G;
     R.canvas = canvasEl; R.lib = lib;
     if (!R.ctx) R.ctx = (typeof GLCanvas !== 'undefined' ? GLCanvas.create(canvasEl) : canvasEl.getContext('2d'));   // one context per page
     R.fogImg = null; R.mem = new Map();
@@ -263,11 +291,8 @@ const RENDER = (() => {
     const c = R.ctx, k = R.cam.k, me = 0;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
-    // ground with the iso transform: texture px (u, v) at R.groundS px a metre
-    const S = R.groundS || 8, [ox, oy] = toScreen(0, 0);
-    c.setTransform(PXM * k / S, PXM * .5 * k / S, -PXM * k / S, PXM * .5 * k / S, ox, oy);
-    c.drawImage(R.ground, 0, 0);
-    c.setTransform(1, 0, 0, 1, 0, 0);
+    // ground: tilted tiles that follow the terrain, back to front (texture px at R.groundS px a metre)
+    drawTerrain(G, c, k, R.ground, R.groundS || 8);
     const vis = (x, y, pad) => { const [sx, sy] = toScreen(x, y); return sx > -pad && sx < R.W + pad && sy > -pad && sy < R.H + pad * 1.5; };
     // craters
     c.fillStyle = 'rgba(58,46,30,.55)';
@@ -303,13 +328,48 @@ const RENDER = (() => {
     drawSmoke(G, c, k);
     // fog
     if (!ui.noFog) {
-      const [fx, fy] = toScreen(0, 0), C = FOG.C;
-      c.setTransform(PXM * k * C, PXM * .5 * k * C, -PXM * k * C, PXM * .5 * k * C, fx, fy);
-      c.drawImage(R.fogC, 0, 0);
-      c.setTransform(1, 0, 0, 1, 0, 0);
+      drawTerrain(G, c, k, R.fogC, 1 / FOG.C, true);   // translucent: tiles must meet, not overlap
     }
     drawOverlay(G, c, k, ui);
     if (c.endFrame) c.endFrame();
+  }
+
+  /* The terrain as tiles: each tile is drawn as the plane that best fits its ground, slightly enlarged so neighbours
+     overlap and no seam shows (translucent layers like fog are drawn seamless instead). The tile list is built once per
+     map: 16 m tiles where the ground is close to a plane, split down to 4 m where it bends (a looser fit when zoomed
+     out). Drawn back to front, only those on screen. img holds S px a metre. */
+  function terrainTiles(G, tol, minT) {
+    const m = G.map, out = [];
+    const fit = (x0, y0, T) => {
+      const h00 = MAP.hAt(m, x0, y0), h10 = MAP.hAt(m, x0 + T, y0), h01 = MAP.hAt(m, x0, y0 + T), h11 = MAP.hAt(m, x0 + T, y0 + T);
+      const gx = (h10 - h00 + h11 - h01) / (2 * T), gy = (h01 - h00 + h11 - h10) / (2 * T), hc = (h00 + h10 + h01 + h11) / 4;
+      let err = 0;
+      for (let j = 0; j <= 4; j++) for (let i = 0; i <= 4; i++) { const x = x0 + T * i / 4, y = y0 + T * j / 4; err = Math.max(err, Math.abs(MAP.hAt(m, x, y) - (hc + gx * (x - x0 - T / 2) + gy * (y - y0 - T / 2)))); }
+      return { x0, y0, T, gx, gy, hc, err };
+    };
+    const split = (x0, y0, T) => { const t = fit(x0, y0, T); if (t.err <= tol || T <= minT) out.push(t); else { const h = T / 2; split(x0, y0, h); split(x0 + h, y0, h); split(x0, y0 + h, h); split(x0 + h, y0 + h, h); } };
+    for (let y = 0; y < m.h; y += 16) for (let x = 0; x < m.w; x += 16) split(x, y, 16);
+    out.sort((p, q) => (p.x0 + p.y0 + p.T) - (q.x0 + q.y0 + q.T));
+    return out;
+  }
+  function drawTerrain(G, c, k, img, S, seamless) {
+    const m = G.map, key = m.seed + ':' + m.w;
+    if (R.tileKey !== key) { R.tileKey = key; R.tilesFine = terrainTiles(G, .06, 4); R.tilesCoarse = terrainTiles(G, .2, 8); }
+    // the 2D fallback rasterises on the CPU: fewer, larger tiles there
+    const list = k >= .6 && R.ctx && R.ctx.endFrame ? R.tilesFine : R.tilesCoarse, ax = PXM * k / S, bx = -PXM * k / S, mar = 16 * PXM * k;
+    let n = 0;
+    for (const t of list) {
+      const wcx = t.x0 + t.T / 2, wcy = t.y0 + t.T / 2, [sx, sy] = toScreenFlat(wcx, wcy, t.hc);
+      if (sx < -mar || sx > R.W + mar || sy < -mar || sy > R.H + mar) continue;
+      // texture px u -> world x = u / S; screen = tile centre + d(screen)/d(world) * (world - centre)
+      const ay = (PXM * .5 * k - VZ * k * t.gx) / S, by = (PXM * .5 * k - VZ * k * t.gy) / S;
+      c.setTransform(ax, ay, bx, by, sx - (ax * wcx * S + bx * wcy * S), sy - (ay * wcx * S + by * wcy * S));
+      const pad = seamless ? 0 : Math.min(.3, t.T * .04), u0 = (t.x0 - pad) * S, v0 = (t.y0 - pad) * S, uw = (t.T + 2 * pad) * S;
+      const su = Math.max(0, u0), sv = Math.max(0, v0), sw = Math.min(img.width, u0 + uw) - su, sh = Math.min(img.height, v0 + uw) - sv;
+      if (sw > 0 && sh > 0) { c.drawImage(img, su, sv, sw, sh, su, sv, sw, sh); n++; }
+    }
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    R.terrainDrawn = n;
   }
 
   /* ---------------- ground markers ---------------- */
@@ -826,5 +886,5 @@ const RENDER = (() => {
   }
   const isGL = () => !!(R.ctx && R.ctx.endFrame);
 
-  return Object.assign(R, { loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  return Object.assign(R, { toScreenFlat, toWorldFlat, hGround, loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();

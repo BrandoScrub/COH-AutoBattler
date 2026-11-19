@@ -617,6 +617,14 @@ const SIM = (() => {
     G.drops = G.drops.filter(d => d.hp > 0 && (d.kind === 'team' || G.t - d.t < DROPS.life));
   }
 
+  /* uphill is slower: speed falls with the climb (rise over run) toward where the unit is heading, at most by 35%
+     (vehicles 45%); downhill is a touch quicker */
+  function slopeFactor(G, x, y, tx, ty, k) {
+    const d = Math.hypot(tx - x, ty - y); if (d < .05) return 1;
+    const L = Math.min(d, 2), ex = x + (tx - x) / d * L, ey = y + (ty - y) / d * L;
+    const climb = (MAP.hAt(G.map, ex, ey) - MAP.hAt(G.map, x, y)) / L;
+    return climb > 0 ? 1 - Math.min(k > .6 ? .45 : .35, climb * k) : 1 + Math.min(.05, -climb * .1);
+  }
   const VAULT = { time: .6, slow: .5, kinds: new Set(['wall', 'hedge', 'sandbags', 'rubble', 'tanktrap', 'wreck']) };
   function crossesLow(G, ax, ay, bx, by) {
     for (const c of MAP.coversNear(G.map, ax, ay)) if (c.alive && VAULT.kinds.has(c.kind) && !(c.built < 1) && !c.blocksI && U.segX(ax, ay, bx, by, c.ax, c.ay, c.bx, c.by)) return true;
@@ -644,7 +652,7 @@ const SIM = (() => {
     }
     let moving = false;
     if (sq.path && sq.path.length && !(sq.order.type === 'attackMove' && sq.engageT > G.t)) {
-      const sp = squadSpeed(sq) * dt, wp = sq.path[0];
+      const wp = sq.path[0], sp = squadSpeed(sq) * dt * slopeFactor(G, sq.x, sq.y, wp.x, wp.y, .55);
       const dx = wp.x - sq.x, dy = wp.y - sq.y, d = Math.hypot(dx, dy);
       if (sp > 0) {
         moving = true;
@@ -681,7 +689,7 @@ const SIM = (() => {
         }
       }
       const dx = tx - m.x, dy = ty - m.y, d = Math.hypot(dx, dy);
-      let step = Math.min(d, speed * dt * (d > 6 ? 1.3 : 1));
+      let step = Math.min(d, speed * dt * (d > 6 ? 1.3 : 1) * (d > .3 ? slopeFactor(G, m.x, m.y, tx, ty, .55) : 1));
       // CoH3 auto-vault: a man crossing a low wall, hedge, sandbag line, rubble or tank trap hops it and is slowed for a moment
       if (m.vaultT > 0) { m.vaultT = Math.max(0, m.vaultT - dt); step *= VAULT.slow; }
       else if (step > .01 && d > .05) { const nx2 = m.x + dx / d * (step + .3), ny2 = m.y + dy / d * (step + .3); if (crossesLow(G, m.x, m.y, nx2, ny2)) { m.vaultT = VAULT.time; step *= VAULT.slow; } }
@@ -840,7 +848,8 @@ const SIM = (() => {
     }
     if (v.speed > .01) {
       const dir = v.order.type === 'reverse' || v.autoRev ? -1 : 1;
-      const nx = v.x + Math.cos(v.heading) * v.speed * dt * dir, ny = v.y + Math.sin(v.heading) * v.speed * dt * dir;
+      const sf = slopeFactor(G, v.x, v.y, v.x + Math.cos(v.heading) * dir * 3, v.y + Math.sin(v.heading) * dir * 3, .8);
+      const nx = v.x + Math.cos(v.heading) * v.speed * sf * dt * dir, ny = v.y + Math.sin(v.heading) * v.speed * sf * dt * dir;
       if (MAP.walkable(grid, G.map, nx, ny) || !MAP.walkable(grid, G.map, v.x, v.y)) { v.x = nx; v.y = ny; v.dist += v.speed * dt; v.stuckT = 0; }
       else {
         // sidestep: try sliding past the corner before giving up

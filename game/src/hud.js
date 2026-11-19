@@ -261,7 +261,7 @@ const HUD = (() => {
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
     put(body, name + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
-      `<div class="line">${strength}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state">${state}</span>` : ''}</div>` +
+      `<div class="line">${strength}${(() => { const h = MAP.hAt(G.map, e.x, e.y); return h >= 1.5 ? `<span class="elev" title="Elevation: sees further; from 2.5 m above a target it fires over the target's cover">&#9650; ${h.toFixed(0)} m</span>` : ''; })()}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state">${state}</span>` : ''}</div>` +
       `<div class="weap">${weapons.join(' &middot; ')}</div>` +
       (e.type === 'vehicle' ? `<div class="armor">Armour ${e.def.armor.join(' / ')} (front / side / rear)</div>` : '') +
       `<div class="hp"><i style="width:${Math.round(hpf * 100)}%"></i></div>`);
@@ -300,6 +300,12 @@ const HUD = (() => {
       bg.fillStyle = '#4a4a38';
       const pts = [[0, 0], [m.w, 0], [m.w, m.h], [0, m.h]].map(([x, y]) => mmToScreen(x, y));
       bg.beginPath(); pts.forEach(([x, y], i) => i ? bg.lineTo(x, y) : bg.moveTo(x, y)); bg.closePath(); bg.fill();
+      // height: lighter on the rises, a contour every 1.5 m
+      if (m.hgt) for (let y = 0; y < m.h; y += 2) for (let x = 0; x < m.w; x += 2) {
+        const h = MAP.hAt(m, x + 1, y + 1); if (h < .8) continue;
+        const [a, bb] = mmToScreen(x + 1, y + 1), edge = Math.floor(MAP.hAt(m, x + 3, y + 1) / 1.5) !== Math.floor(h / 1.5) || Math.floor(MAP.hAt(m, x + 1, y + 3) / 1.5) !== Math.floor(h / 1.5);
+        bg.fillStyle = edge ? 'rgba(30,26,16,.35)' : `rgba(230,215,160,${Math.min(.35, h * .055)})`; bg.fillRect(a - 1.3, bb - 1.3, 2.6, 2.6);
+      }
       bg.strokeStyle = '#a89878'; bg.lineWidth = 2;
       for (const rd of m.roads) { bg.beginPath(); rd.forEach(([x, y], i) => { const [a, bb] = mmToScreen(x, y); i ? bg.lineTo(a, bb) : bg.moveTo(a, bb); }); bg.stroke(); }
       bg.fillStyle = '#2f3a22'; for (const t of m.trees) { const [a, bb] = mmToScreen(t.x, t.y); bg.fillRect(a - 1, bb - 1, 2.5, 2.5); }

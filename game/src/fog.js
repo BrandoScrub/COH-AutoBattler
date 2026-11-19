@@ -13,7 +13,8 @@ const FOG = (() => {
         if (e.type === 'building') { sight = e.built >= 1 ? 30 : 12; eyes = [e]; }
         else if (e.type === 'vehicle') { sight = e.def.sight; eyes = [e]; }
         else { sight = e.def.sight; const al = e.models.filter(q => q.alive); eyes = al.length ? [al[0], al[al.length - 1]] : []; }
-        for (const s of eyes) reveal(G, v, s.x, s.y, sight, gw, gh);
+        // high ground sees further: +1.5 m of sight per metre above the valley floor, up to +9 m
+        for (const s of eyes) reveal(G, v, s.x, s.y, sight + Math.min(9, MAP.hAt(G.map, s.x, s.y) * 1.5), gw, gh);
       }
     }
   }
@@ -34,7 +35,7 @@ const FOG = (() => {
       const x = (ax + (bx - ax) * i / n) | 0, y = (ay + (by - ay) * i / n) | 0;
       if (m.block[y * m.w + x] & 4) return false;
     }
-    return !MAP.smokeBlocks(m, ax, ay, bx, by);
+    return !MAP.smokeBlocks(m, ax, ay, bx, by) && MAP.terrainClear(m, ax, ay, bx, by, 1.7, .3);
   }
   function seen(G, slot, x, y) {
     const P = G.players[slot], gw = G.map.w / C;

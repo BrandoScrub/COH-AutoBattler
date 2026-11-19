@@ -70,6 +70,36 @@ const MAP = (() => {
       m.fields.push(f); if (Math.abs(x - y) > 10) m.fields.push({ ...f, x: y, y: x, w: f.h, h: f.w, rot: -f.rot });
     }
 
+    /* ---- elevation (CoH3: height extends sight, hides what is behind a crest, and shooting down ignores cover) ----
+       Heights on the corner grid of the 1 m cells, in metres. Built from hills listed for one half and mirrored across
+       the x = y diagonal, so both sides get the same ground, plus a gentle symmetric swell. Bases stay flat. */
+    const HW = W + 1;
+    m.hgt = new Float32Array(HW * (H + 1));
+    const hills = [
+      { x: 100, y: 100, r: 20, h: 4.5 },      // the rise under the central victory point
+      { x: 62, y: 118, r: 15, h: 6 },         // a hill over the munitions point and the road junction
+      { x: 108, y: 160, r: 12, h: 4 },        // a knoll by the fuel point
+      { x: 36, y: 92, r: 11, h: 3.5 },        // a low hill on the outer flank
+    ];
+    const allHills = hills.concat(hills.filter(h => h.x !== h.y).map(h => ({ ...h, x: h.y, y: h.x })));
+    const swell = (x, y) => { const a = x + y, b = Math.abs(x - y); return .55 * Math.sin(a * .045 + 1.3) * Math.cos(b * .06) + .35 * Math.sin(b * .09 + .4); };
+    for (let y = 0; y <= H; y++) for (let x = 0; x <= W; x++) {
+      let h = Math.max(0, swell(x, y) + .5);
+      for (const k of allHills) { const d2 = ((x - k.x) ** 2 + (y - k.y) ** 2) / (k.r * k.r); if (d2 < 4) h += k.h * Math.exp(-d2 * 1.6) * (1 - d2 / 4); }
+      // bases flat (they ramp up from 40 m out)
+      let flat = 1; for (const b of m.bases) { const d = Math.hypot(x - b.x, y - b.y); flat = Math.min(flat, U.clamp((d - 40) / 18, 0, 1)); }
+      m.hgt[y * HW + x] = h * flat;
+    }
+    // level pads under houses (set where each house goes, below)
+    m.flatPad = (cx, cy, w, d) => {
+      const pad = 2.5, x0 = Math.floor(cx - w / 2 - pad), x1 = Math.ceil(cx + w / 2 + pad), y0 = Math.floor(cy - d / 2 - pad), y1 = Math.ceil(cy + d / 2 + pad);
+      const hc = hAt(m, cx, cy);
+      for (let y = Math.max(0, y0 - 3); y <= Math.min(H, y1 + 3); y++) for (let x = Math.max(0, x0 - 3); x <= Math.min(W, x1 + 3); x++) {
+        const dx = Math.max(0, x0 - x, x - x1), dy = Math.max(0, y0 - y, y - y1), t = U.clamp(1 - Math.hypot(dx, dy) / 3, 0, 1);
+        const i = y * HW + x; m.hgt[i] = m.hgt[i] + (hc - m.hgt[i]) * t;
+      }
+    };
+
     /* ---- houses: farmsteads and a hamlet round the centre ---- */
     const halfHouses = [
       { x: 90, y: 116, w: 9, d: 7 }, { x: 80, y: 106, w: 6, d: 6 }, { x: 64, y: 70, w: 8, d: 6 }, { x: 128, y: 156, w: 9, d: 6 },
@@ -77,7 +107,7 @@ const MAP = (() => {
     ];
     const addHouse = h => {
       const house = { id: m.houses.length, x: h.x, y: h.y, w: h.w, d: h.d, hp: 1200, maxHp: 1200, occ: null, dead: false, roof: R.pick(['tile', 'tile', 'slate']), wall: R.pick(['stucco', 'stone', 'stucco']) };
-      m.houses.push(house);
+      m.houses.push(house); m.flatPad(h.x, h.y, h.w, h.d);
       for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
         if (inside(x, y)) m.block[idx(x, y)] |= BI | BV | BL;
     };
@@ -224,7 +254,22 @@ const MAP = (() => {
       const x = (ax + (bx - ax) * i / n) | 0, y = (ay + (by - ay) * i / n) | 0;
       if (m.block[y * m.w + x] & BL) return false;
     }
-    return !smokeBlocks(m, ax, ay, bx, by);
+    return terrainClear(m, ax, ay, bx, by) && !smokeBlocks(m, ax, ay, bx, by);
+  }
+  /* ground height (m) at a point: bilinear on the corner grid */
+  function hAt(m, x, y) {
+    if (!m.hgt) return 0;
+    const HW = m.w + 1, fx = U.clamp(x, 0, m.w - .001), fy = U.clamp(y, 0, m.h - .001), x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, i = y0 * HW + x0, g = m.hgt;
+    return (g[i] * (1 - tx) + g[i + 1] * tx) * (1 - ty) + (g[i + HW] * (1 - tx) + g[i + HW + 1] * tx) * ty;
+  }
+  /* a crest between two points hides one from the other: eyes 1.7 m up, aim 1.2 m up the target */
+  const EYE = 1.7, AIM = 1.2;
+  function terrainClear(m, ax, ay, bx, by, eye, aim) {
+    if (!m.hgt) return true;
+    const za = hAt(m, ax, ay) + (eye == null ? EYE : eye), zb = hAt(m, bx, by) + (aim == null ? AIM : aim);
+    const d = Math.hypot(bx - ax, by - ay), n = Math.ceil(d);
+    for (let i = 2; i < n - 1; i++) { const t = i / n; if (hAt(m, ax + (bx - ax) * t, ay + (by - ay) * t) > za + (zb - za) * t + .05) return false; }
+    return true;
   }
   /* smoke: a sight line through the thick of a cloud is blocked; men inside a cloud see and are seen only close by */
   function smokeBlocks(m, ax, ay, bx, by) {
@@ -359,6 +404,6 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
+  return { hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;

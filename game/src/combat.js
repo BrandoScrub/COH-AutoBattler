@@ -39,7 +39,9 @@ const COMBAT = (() => {
   function addSupp(G, sq, amount, sx, sy) {
     if (sq.retreating || sq.type !== 'squad') return;
     const al = sq.models.filter(m => m.alive); if (!al.length) return;
-    const cov = D.COVER[sq.garrison != null ? 'garrison' : MAP.coverAt(G.map, al[0].x, al[0].y, sx, sy)] || D.COVER.none;
+    let ck = sq.garrison != null ? 'garrison' : MAP.coverAt(G.map, al[0].x, al[0].y, sx, sy);
+    if ((ck === 'light' || ck === 'heavy') && MAP.hAt(G.map, sx, sy) - MAP.hAt(G.map, al[0].x, al[0].y) >= HIGH) ck = 'none';
+    const cov = D.COVER[ck] || D.COVER.none;
     sq.supp = Math.min(D.SUPP.cap, sq.supp + amount * cov.supp * (sq.def.crewWeapon ? .5 : 1));
   }
 
@@ -98,6 +100,9 @@ const COMBAT = (() => {
     }
     return best;
   }
+  /* height bands (CoH3): a shooter 2.5 m or more above the target fires down over its cover */
+  const HIGH = 2.5;
+  function highGround(G, from, to) { return MAP.hAt(G.map, from.x, from.y) - MAP.hAt(G.map, to.x, to.y) >= HIGH; }
   function windowTarget(G, sq, x, y) {
     let best = null, bd = 1e9;
     for (const m of sq.models) { if (!m.alive) continue; const d = U.dist2(m.x, m.y, x, y); if (d < bd && MAP.los(G.map, x, y, m.x, m.y)) { bd = d; best = m; } }
@@ -247,7 +252,8 @@ const COMBAT = (() => {
     let acc = U.profile(w.acc, w.rng, d) * vb.acc * (moving ? (w.moveAcc || .5) : 1) * (src.suppState === 1 ? .5 : 1);
     if (MAP.inSmoke(G.map, tm.x, tm.y) || MAP.inSmoke(G.map, from.x, from.y)) acc *= .5;   // firing into or out of smoke
     if (t.type === 'squad') {
-      const cover = w.ignoresCover ? 'none' : t.garrison != null ? 'garrison' : MAP.coverAt(G.map, tm.x, tm.y, from.x, from.y);
+      let cover = w.ignoresCover ? 'none' : t.garrison != null ? 'garrison' : MAP.coverAt(G.map, tm.x, tm.y, from.x, from.y);
+      if ((cover === 'light' || cover === 'heavy') && highGround(G, from, tm)) cover = 'none';   // shooting down over the wall
       const C = D.COVER[cover] || D.COVER.none, tvb = SIM.vetBonus(t);
       let rAcc = tvb.rAcc * (t.retreating ? .6 : 1) * (t.crew && t.crew.state === 'deployed' && t.def.setupRAcc ? t.def.setupRAcc : 1) * (t.suppState === 2 ? 1.25 : 1);
       const p = Math.min(.98, acc * (t.def.targetSize || 1) * C.acc * rAcc);
@@ -433,6 +439,6 @@ const COMBAT = (() => {
     if (b.hp <= 0) { SIM.event(G, b.owner, 'lost', b.def.name + ' destroyed', b.x, b.y); SIM.kill(G, b); }
   }
 
-  return { CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
+  return { HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;
