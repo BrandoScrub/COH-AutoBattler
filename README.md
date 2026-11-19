@@ -15,6 +15,7 @@ art/               the exports: assets.json, pack/ pages, crew_layout.json (comm
 tools/             build, check, preview and engine-update scripts (below)
 docs/previews/     review GIFs and sheets drawn from art/
 docs/sheets/       grey and colour review sheets of every vehicle and squad, play-size line-up (tools/build.py)
+docs/reference/     annotated Company of Heroes 3 screenshots: HUD, menus and battlefield reference (coh3/README.md)
 exports/obj/       every vehicle and squad as OBJ + MTL (metres, y up, flat colours) for other 3D tools (tools/build.py)
 ```
 
