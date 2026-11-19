@@ -141,7 +141,10 @@ const SIM = (() => {
 
   /* ---------------- orders ---------------- */
   function issue(G, ids, o, queue) {
-    const ents = ids.map(id => G.byId.get(id)).filter(e => e && !e.dead);
+    const all = ids.map(id => G.byId.get(id)).filter(e => e && !e.dead);
+    // a retreat cannot be called off (as in CoH3): retreating squads ignore every order until they reach base
+    const ents = all.filter(e => !e.retreating || o.type === 'retreat');
+    if (!ents.length && all.length) { const r = all[0]; event(G, r.owner, 'error', 'Retreating: orders resume once the squad reaches base', r.x, r.y); return; }
     if (o.type === 'move' || o.type === 'attackMove' || o.type === 'reverse') {
       // spread a group round the click so squads don't stack
       const n = ents.length, offs = formationOffsets(n, null);
@@ -167,7 +170,7 @@ const SIM = (() => {
   }
   function orderEnt(G, e, o, queue) {
     if (e.type === 'building') return buildingOrder(G, e, o);
-    if (e.retreating && o.type !== 'retreat' && o.type !== 'stop' && o.type !== 'move' && o.type !== 'attackMove') return;
+    if (e.retreating) return;   // already on its way back; see issue()
     if (queue && e.order.type !== 'idle' && (o.type === 'move' || o.type === 'attackMove')) { (e.queue = e.queue || []).push(o); return; }
     e.queue = [];
     if (e.type === 'squad' && e.models.some(m => m.alive) && isPinned(e) && o.type !== 'retreat') return;   // pinned squads only retreat
