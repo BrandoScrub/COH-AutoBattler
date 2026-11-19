@@ -33,8 +33,19 @@ const AI = (() => {
     }
     // help finish buildings
     for (const b of buildings) if (b.built < 1) for (const p of builders) if (p.order.type !== 'build') { p.buildQueue = [{ kind: 'building', id: b.id }]; p.order = { type: 'build' }; }
-    // keep money for tech when it is close
-    const reserve = wantTech ? D.BUILDINGS[next].cost : { mp: 0, fu: 0 };
+    // no builder left: replace one first, ahead of everything else (it can't tech without one)
+    const builderQueued = buildings.some(b => b.queue.some(q => SIM.unitDef(q.unit).builder));
+    if (!builders.length && !builderQueued) {
+      const hqB = buildings.find(b => b.built >= 1 && b.def.produce.includes(me.F.builder));
+      if (hqB && !hqB.queue.length && !SIM.prodBlock(G, hqB, me.F.builder)) { SIM.issue(G, [hqB.id], { type: 'produce', unit: me.F.builder }); return; }
+    }
+    // keep money for tech when it is close, but only what the tech is actually waiting on: saving manpower while fuel is
+    // still far short just banks it (the old rule left 200+ manpower idle and starved the army)
+    let reserve = { mp: 0, fu: 0 };
+    if (wantTech && (builders.length || builderQueued)) {
+      const c = D.BUILDINGS[next].cost, fuShort = (c.fu || 0) - me.res.fu, fuRate = Math.max(1, me.income ? me.income.fu : 6) / 60;
+      reserve = { mp: fuShort > 0 && fuShort / fuRate > 45 ? 0 : (c.mp || 0), fu: c.fu || 0 };
+    }
     const phase = G.t < 240 ? 'early' : (owned.has(tech[3]) ? 'late' : 'mid');
     const wishes = PLAN[me.side][phase].concat(phase === 'late' ? PLAN[me.side].mid.map(([u, w]) => [u, w * .4]) : []);
     // counter enemy armour
@@ -45,7 +56,7 @@ const AI = (() => {
         const def = SIM.unitDef(u);
         let ww = w;
         if (enemyV && (def.weapons || []).some(x => D.W[x] && (D.W[x].kind === 'at' || (D.W[x].kind === 'cannon' && D.W[x].pen[0] > 150)))) ww *= 1 + enemyV;
-        if (def.builder && builders.length >= (G.t > 300 ? 2 : 1)) ww = 0;
+        if (def.builder && builders.length + (builderQueued ? 1 : 0) >= (G.t > 300 ? 2 : 1)) ww = 0;
         const have = mine.filter(e => e.defId === u).length + G.ents.filter(x => x.type === 'building' && x.owner === me.slot && x.queue.some(q => q.unit === u)).length;
         const cap = CAP[u] != null ? CAP[u] : 99; if (have >= cap) ww = 0;
         ww /= 1 + have * .35;
@@ -96,7 +107,7 @@ const AI = (() => {
       // pull back when losing
       if (e.type === 'squad') {
         const al = e.models.filter(m => m.alive).length;
-        if (!e.retreating && (al <= Math.ceil(e.maxModels / 3) && G.t - e.lastHit < 5 || e.suppState === 2 && G.rng() < .3)) { SIM.issue(G, [e.id], { type: 'retreat' }); continue; }
+        if (!e.retreating && ((al <= Math.ceil(e.maxModels / (e.def.builder ? 2 : 3)) || e.def.builder && al < e.maxModels && G.t - e.lastHit < 3) && G.t - e.lastHit < 5 || e.suppState === 2 && G.rng() < .3)) { SIM.issue(G, [e.id], { type: 'retreat' }); continue; }
         if (e.retreating) continue;
         // just back from a retreat: wait to refill
         if (al < e.maxModels && SIM.nearReinforcePoint(G, e) && me.res.mp > e.def.reinforce) { if (e.order.type !== 'idle') SIM.issue(G, [e.id], { type: 'stop' }); continue; }
@@ -157,6 +168,8 @@ const AI = (() => {
       let best = null, bs = -1e9;
       for (const g of goals) {
         const d = Math.hypot(g.p.x - e.x, g.p.y - e.y);
+        // builders take only points close to home: losing the only builder stalls the whole tech tree
+        if (e.def.builder && Math.hypot(g.p.x - hq.x, g.p.y - hq.y) > 75) continue;
         const s = g.v * 40 - d * .35 - g.assigned * 25 + (e.type === 'vehicle' && g.p.type === 'victory' ? 20 : 0);
         if (s > bs) { bs = s; best = g; }
       }
