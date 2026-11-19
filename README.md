@@ -40,8 +40,9 @@ artkit/            the art engine, pinned (artkit/VENDORED.json: engine commit +
 game/              the browser game (above)
 models/            how each unit is drawn (Python): vehicles, infantry, crews, paint; roster.py lists them all
 data/units.json    the art roster: kind, side, name, headings, art key. build_art.py exports exactly these.
-styles/ww2/        the game's artkit style pack
-art/               the exports: assets.json, pack/ pages, crew_layout.json (committed: the game ships its art)
+styles/ww2/        the game's artkit style pack; tiles/ holds the painted texture sources (1024 px)
+art/               the exports: assets.json, pack/ pages, crew_layout.json (committed: the game ships its art);
+                   ground/ holds the ground tiles the game paints the map with (512 px copies of styles/ww2/tiles)
 tools/             build, check, preview, engine-update and web-build scripts (below)
 docs/reference/    annotated Company of Heroes 3 screenshots: HUD, menus and battlefield reference (coh3/README.md)
 docs/previews/     review GIFs and sheets drawn from art/

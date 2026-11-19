@@ -21,10 +21,98 @@ const RENDER = (() => {
       const v = (a, b) => g[((b % N + N) % N) * N + ((a % N + N) % N)];
       return U.lerp(U.lerp(v(xi, yi), v(xi + 1, yi), s(fx)), U.lerp(v(xi, yi + 1), v(xi + 1, yi + 1), s(fx)), s(fy)); };
   }
+  /* Painted ground tiles (art/ground/*.jpg, sources in styles/ww2/tiles/): flat seamless squares, each covering TILE_M
+     metres. loadGround() fetches them at start-up; without them (a missing file, or no browser) the flat stand-in
+     ground below is drawn instead, so nothing else depends on them. */
+  const GROUND_TILES = ['ground_dry_grass', 'ground_dry_grass_patchy', 'ground_dry_grass_scorched', 'ground_green_grass',
+    'ground_white_road', 'ground_white_road_alt', 'ground_dirt', 'ground_dirt_alt', 'field_wheat', 'field_stubble',
+    'field_stubble_alt', 'field_ploughed'];
+  const TILE_M = { _: 6, ground_white_road: 6.4, ground_white_road_alt: 6.4, field_ploughed: 7, field_stubble: 6, field_wheat: 5 };
+  const ROAD_W = 5.6;                       // gravel width in metres (the old stand-in's middle stroke)
+  R.tiles = {};
+  function loadGround(base) {
+    return Promise.all(GROUND_TILES.map(n => new Promise(res => {
+      const im = new Image(); im.onload = () => { R.tiles[n] = im; res(); }; im.onerror = () => res(); im.src = base + n + '.jpg';
+    })));
+  }
   function buildGround(G) {
     // the ground depends only on the map, so a second match on the same map reuses it
     if (R.ground && R.groundKey === G.map.seed + ':' + G.map.w) return;
     R.groundKey = G.map.seed + ':' + G.map.w;
+    if (!R.tiles.ground_dry_grass) { R.groundS = 8; return buildGroundFlat(G); }
+    buildGroundPainted(G);
+  }
+  function buildGroundPainted(G) {
+    const m = G.map, S = R.groundS = 12, W = m.w * S, H = m.h * S, c = canvas(W, H), g = c.getContext('2d');
+    // a tile pattern at S px a metre (the tile pre-scaled once, so the pattern repeats every TILE_M metres)
+    const pat = (n, ctx) => {
+      const im = R.tiles[n]; if (!im) return null;
+      const px = Math.round((TILE_M[n] || TILE_M._) * S), t = canvas(px, px), tg = t.getContext('2d');
+      tg.imageSmoothingQuality = 'high'; tg.drawImage(im, 0, 0, px, px);
+      return (ctx || g).createPattern(t, 'repeat');
+    };
+    // a soft mask from a function of world metres, at 2 px a metre, smoothed up to the ground size
+    const mask = fn => {
+      const R2 = 2, mw = m.w * R2, mh = m.h * R2, mc = canvas(mw, mh), mg = mc.getContext('2d'), img = mg.createImageData(mw, mh), d = img.data;
+      for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) { const i = (y * mw + x) * 4; d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.max(0, Math.min(255, fn((x + .5) / R2, (y + .5) / R2) * 255)); }
+      mg.putImageData(img, 0, 0); return mc;
+    };
+    // paint tile n through a mask onto the ground, at strength alpha
+    const layer = (n, mc, alpha = 1) => {
+      const p = pat(n); if (!p) return;
+      const l = canvas(W, H), lg = l.getContext('2d'); lg.fillStyle = pat(n, lg); lg.fillRect(0, 0, W, H);
+      lg.globalCompositeOperation = 'destination-in'; lg.imageSmoothingQuality = 'high'; lg.drawImage(mc, 0, 0, W, H);
+      g.globalAlpha = alpha; g.drawImage(l, 0, 0); g.globalAlpha = 1;
+    };
+    const n1 = noise2(11), n2 = noise2(23), n3 = noise2(37), n4 = noise2(53);
+    const ramp = (v, a, b) => Math.max(0, Math.min(1, (v - a) / (b - a)));
+    // 1. dry grass everywhere; patchy grass, scorched grass and green patches over it break up the repeat
+    g.fillStyle = pat('ground_dry_grass'); g.fillRect(0, 0, W, H);
+    layer('ground_dry_grass_patchy', mask((x, y) => ramp(n1(x / 11, y / 11), .5, .72)));
+    layer('ground_dry_grass_scorched', mask((x, y) => ramp(n3(x / 16 + 3, y / 16), .6, .8)), .8);
+    layer('ground_green_grass', mask((x, y) => ramp(n2(x / 14 + 7, y / 14), .6, .78)), .7);
+    // 2. trodden earth: yards round the farmhouses, the capture points and the two bases, with ragged edges
+    const yards = [];
+    for (const h of m.houses) yards.push([h.x, h.y, Math.max(h.w, h.d) / 2 + 4.5]);
+    for (const p of m.points) yards.push([p.x, p.y, p.radius + 1.5]);
+    for (const b of m.bases) yards.push([b.x, b.y, 15]);
+    const yardMask = mask((x, y) => {
+      let v = 0; const wob = (n4(x / 2.2, y / 2.2) - .5) * 3.2;
+      for (const [cx, cy, r] of yards) { const dd = Math.hypot(x - cx, y - cy); if (dd < r + 3) v = Math.max(v, ramp(r + wob - dd, 0, 2.2)); }
+      return v;
+    });
+    layer('ground_dirt', yardMask, .95);
+    // 3. fields: each kind's tile in its rotated plot, rows along the plot, a darker worn margin round it
+    const FIELD = { wheat: ['field_wheat', 1], stubble: ['field_stubble', 1], ploughed: ['field_ploughed', 1], green: ['ground_green_grass', 1],
+                    olive: ['ground_dirt_alt', .6] };   // olive: stand-in until ground_olive_grove is painted
+    for (const f of m.fields) {
+      const [n, a] = FIELD[f.kind] || []; const p = n && pat(n);
+      g.save(); g.translate(f.x * S, f.y * S); g.rotate(f.rot);
+      const w = f.w * S, h = f.h * S;
+      if (p) { g.globalAlpha = a; g.fillStyle = p; g.fillRect(-w / 2, -h / 2, w, h); g.globalAlpha = 1; }
+      g.strokeStyle = 'rgba(70,56,32,.35)'; g.lineWidth = .6 * S; g.strokeRect(-w / 2, -h / 2, w, h);
+      g.restore();
+    }
+    // 4. roads: a dusty shoulder, then the gravel laid segment by segment so the wheel ruts follow the road
+    const roadPat = [pat('ground_white_road'), pat('ground_white_road_alt')], rt = (TILE_M.ground_white_road) * S;
+    for (const rd of m.roads) {
+      g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath(); rd.forEach(([x, y], i) => i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S));
+      g.strokeStyle = 'rgba(150,128,92,.45)'; g.lineWidth = (ROAD_W + 2.4) * S; g.stroke();
+      g.strokeStyle = 'rgba(196,180,150,.9)'; g.lineWidth = (ROAD_W + .3) * S; g.stroke();   // joins and bends under the gravel
+    }
+    let seg = 0;
+    for (const rd of m.roads) for (let i = 0; i < rd.length - 1; i++, seg++) {
+      const [ax, ay] = rd[i], [bx, by] = rd[i + 1], L = Math.hypot(bx - ax, by - ay) * S, hw = ROAD_W * S / 2;
+      g.save(); g.translate(ax * S, ay * S); g.rotate(Math.atan2(by - ay, bx - ax));
+      g.beginPath(); g.rect(-hw * .35, -hw, L + hw * .7, 2 * hw); g.clip();
+      g.translate(seg * 97 % rt, -rt / 2);                   // centre the tile's ruts on the road; vary where each segment starts
+      g.fillStyle = roadPat[seg % 3 === 2 ? 1 : 0] || roadPat[0]; g.fillRect(-rt - hw, 0, L + 2 * rt + 2 * hw, rt);
+      g.restore();
+    }
+    R.ground = c;
+  }
+  function buildGroundFlat(G) {
     const m = G.map, S = 8, c = canvas(m.w * S, m.h * S), g = c.getContext('2d');
     const n1 = noise2(11), n2 = noise2(23), n3 = noise2(37);
     const img = g.createImageData(c.width, c.height), d = img.data;
@@ -174,8 +262,8 @@ const RENDER = (() => {
     const c = R.ctx, k = R.cam.k, me = 0;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
-    // ground with the iso transform: texture px (u, v) at 8 px a metre
-    const S = 8, [ox, oy] = toScreen(0, 0);
+    // ground with the iso transform: texture px (u, v) at R.groundS px a metre
+    const S = R.groundS || 8, [ox, oy] = toScreen(0, 0);
     c.setTransform(PXM * k / S, PXM * .5 * k / S, -PXM * k / S, PXM * .5 * k / S, ox, oy);
     c.drawImage(R.ground, 0, 0);
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -683,5 +771,5 @@ const RENDER = (() => {
   }
   const isGL = () => !!(R.ctx && R.ctx.endFrame);
 
-  return Object.assign(R, { warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  return Object.assign(R, { loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();
