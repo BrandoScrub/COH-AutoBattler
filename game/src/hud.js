@@ -237,10 +237,10 @@ const HUD = (() => {
       if (key !== lastPanelKey) { pc.getContext('2d').clearRect(0, 0, 128, 128); lastPanelKey = key; }
       put(sc, ''); return;
     }
-    const e = sel[0], P = G.players[e.owner], own = e.owner === 0;
+    const e = sel[0], P = G.players[e.owner] || { F: { name: 'Abandoned' } }, own = e.owner === 0;
     const key = e.id + ':' + (e.crew ? e.crew.state : '') + ':' + (e.type === 'building' ? e.built >= 1 : '');
     if (key !== lastPanelKey) { if (e.type === 'building') drawBuildingPortrait(pc, e); else RENDER.portrait(G, e, pc); lastPanelKey = key; }
-    const name = `<div class="own" style="color:${RENDER.TEAM[e.owner]}">${own ? 'You' : 'Enemy'} &middot; ${P.F.name}</div><h3>${e.def.name}</h3>`;
+    const name = `<div class="own" style="color:${RENDER.TEAM[e.owner] || '#bbb'}">${own ? 'You' : e.owner < 0 ? 'Nobody' : 'Enemy'} &middot; ${P.F.name}</div><h3>${e.def.name}</h3>`;
     if (e.type === 'building') {
       const hp = Math.max(0, e.hp / e.maxHp);
       put(body, name + (e.def.reinforce ? '<div class="hl">Can reinforce infantry.</div>' : '') +
@@ -256,7 +256,7 @@ const HUD = (() => {
     if (e.type === 'squad') { const al = e.models.filter(m => m.alive); strength = `<span class="str">&#128100; ${al.length}/${e.maxModels}</span>`; hpf = al.reduce((a, m) => a + m.hp, 0) / (al.length ? al.length * al[0].maxHp : 1); }
     else hpf = e.hp / e.maxHp;
     const cov = e.type === 'squad' ? COMBAT.squadCover(G, e) : null;
-    const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.garrison != null ? 'In a building' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.order.type === 'reverse' ? 'Reversing' : '');
+    const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.garrison != null ? 'In a building' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.owner < 0 ? 'Abandoned: right-click with infantry to recrew' : e.crit ? [e.crit.engine === 2 ? 'Immobilised' : e.crit.engine === 1 ? 'Engine damaged' : '', e.crit.gun ? 'Main gun destroyed' : '', e.crit.shockT > G.t ? 'Crew shocked' : ''].filter(Boolean).join(' · ') || (e.order.type === 'reverse' ? 'Reversing' : '') : e.order.type === 'reverse' ? 'Reversing' : '');
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
     put(body, name + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
@@ -488,6 +488,12 @@ const HUD = (() => {
     if (sel[0].type === 'building') { SIM.issue(G, sel.map(s => s.id), { type: 'rally', x: wx, y: wy }); return; }
     const units = sel.filter(s => s.type !== 'building').map(s => s.id);
     const t = !dragged && entAt(e.clientX, e.clientY);
+    // an abandoned vehicle: the nearest infantry squad climbs in; anything else fires on it
+    if (t && t.owner < 0 && t.type === 'vehicle') {
+      const inf = sel.filter(s => SIM.canPickUp(s) && s.models.filter(m => m.alive).length >= 2).sort((a, b) => U.dist2(a.x, a.y, t.x, t.y) - U.dist2(b.x, b.y, t.x, t.y));
+      if (inf.length) { SIM.issue(G, [inf[0].id], { type: 'recrew', target: t.id }); marker(t.x, t.y, '#ffe27a'); return; }
+      SIM.issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return;
+    }
     if (t && t.owner === 1) { SIM.issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return; }
     if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
       const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);

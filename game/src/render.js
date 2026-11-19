@@ -218,11 +218,11 @@ const RENDER = (() => {
     const key = 'deco:' + glyph + slot + state; if (R.sprites[key]) return R.sprites[key];
     const c = canvas(36, 44), g = c.getContext('2d');
     g.translate(18, 22);
-    g.fillStyle = state === 'sel' ? '#f2f2f2' : slot === 1 ? '#2a1414' : '#141c24';
+    g.fillStyle = state === 'sel' ? '#f2f2f2' : slot < 0 ? '#2a2a26' : slot === 1 ? '#2a1414' : '#141c24';
     g.strokeStyle = '#000'; g.lineWidth = 2;
     g.beginPath(); g.moveTo(-15, -16); g.lineTo(15, -16); g.lineTo(15, 6); g.lineTo(0, 19); g.lineTo(-15, 6); g.closePath(); g.fill(); g.stroke();
-    g.fillStyle = TEAM[slot]; g.fillRect(-15, -16, 30, 5);
-    g.translate(0, 2); g.fillStyle = g.strokeStyle = state === 'sel' ? '#111' : TEAM[slot];
+    g.fillStyle = (TEAM[slot] || '#b0ab9a'); g.fillRect(-15, -16, 30, 5);
+    g.translate(0, 2); g.fillStyle = g.strokeStyle = state === 'sel' ? '#111' : (TEAM[slot] || '#b0ab9a');
     (GLYPHS[glyph] || GLYPHS.infantry)(g);
     return R.sprites[key] = c;
   }
@@ -779,7 +779,7 @@ const RENDER = (() => {
   /* portrait for the unit panel: the unit's own sprite drawn into a small 2D canvas */
   function portrait(G, e, cv) {
     const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
-    const side = G.players[e.owner].side;
+    const side = (G.players[e.owner] || {}).side || e.def.side;
     let key, s;
     if (e.type === 'vehicle') { key = e.def.art; s = { clip: 'idle', frame: 0, heading: 135, upperHeading: 135 }; }
     else if (e.type === 'squad') { key = side + '_' + (e.def.crewWeapon && e.crew && e.crew.state !== 'packed' ? e.def.crewWeapon : e.def.models[0]); s = { clip: 'idle', frame: 0, heading: 135 }; }

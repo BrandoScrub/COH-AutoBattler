@@ -105,6 +105,7 @@ const SIM = (() => {
     for (const p of G.players) { p.pop = 0; p.upkeep = 0; }
     for (const e of G.ents) {
       if (e.dead || e.type === 'building') continue;
+      if (e.owner < 0) continue;
       const P = G.players[e.owner]; P.pop += e.def.pop; P.upkeep += e.def.upkeep * (e.type === 'squad' ? e.models.filter(m => m.alive).length / e.maxModels : 1);
     }
     for (const e of G.ents) if (e.type === 'building') for (const q of e.queue) G.players[e.owner].pop += (D.SQUADS[q.unit] || D.VEHICLES[q.unit]).pop;
@@ -198,9 +199,11 @@ const SIM = (() => {
     switch (o.type) {
       case 'garrison': if (canGarrison(e)) orderGarrison(G, e, G.map.houses[o.house]); break;
       case 'pickup': orderPickup(G, e, dropById(G, o.drop)); break;
+      case 'recrew': { const v = G.byId.get(o.target); if (v && v.type === 'vehicle' && v.owner < 0 && canPickUp(e)) { if (e.garrison != null) leaveHouse(G, e, v.x, v.y); e.order = { type: 'recrew', target: v.id }; e.forceTarget = null; e.slots = null; setPath(G, e, v.x, v.y); } break; }
       case 'unload': if (e.type === 'squad' && e.garrison != null) { leaveHouse(G, e, o.x, o.y); e.order = { type: 'idle' }; } break;
       case 'stop': e.order = { type: 'idle' }; e.path = null; e.target = null; e.retreating = false; e.forceTarget = null; e.autoRev = false; e.faceTo = null; break;
       case 'move': case 'attackMove': case 'reverse':
+        if (e.type === 'vehicle' && e.crit && e.crit.engine === 2) { event(G, e.owner, 'error', e.def.name + ' is immobilised: repair it first', e.x, e.y); return; }
         // a team weapon told to go where it already stands just turns to face the new way
         if (e.crew && e.crew.state !== 'packed' && Math.hypot(o.x - e.crew.x, o.y - e.crew.y) < 3) { if (o.face != null && Math.abs(U.angNorm(o.face - e.crew.heading)) > .3) setup(G, e, o.face); return; }
         e.retreating = false; e.forceTarget = null;
@@ -383,6 +386,7 @@ const SIM = (() => {
     if (d > (sq.building ? 8 : 5)) { if (!sq.path || !sq.path.length || sq.repathT < G.t) { const p = t.type === 'building' ? nearEdge(sq, t) : t; setPath(G, sq, p.x, p.y); sq.repathT = G.t + 2; } sq.building = false; return; }
     sq.path = null; sq.building = true; sq.buildAt = { x: t.x, y: t.y };
     t.hp = Math.min(t.maxHp, t.hp + (sq.def.repair || 8) * sq.models.filter(m => m.alive).length / sq.maxModels * dt * (sq.vet >= 2 ? 1.4 : 1));
+    if (t.type === 'vehicle' && t.crit && t.hp >= t.maxHp * .9) { t.crit = null; event(G, t.owner, 'built', t.def.name + ' repaired: criticals fixed', t.x, t.y); }
   }
 
   /* ---------------- upgrades and abilities ---------------- */
@@ -585,6 +589,27 @@ const SIM = (() => {
     popRecount(G);
     event(G, sq.owner, 'captured', (d.side !== G.players[sq.owner].side ? 'Captured ' : 'Recrewed ') + tDef.name.replace(' Team', ''), d.x, d.y);
   }
+  /* abandoned vehicles: the crew bails out, the hulk is neutral until a squad climbs in (two men become its crew) */
+  function abandonVehicle(G, v) {
+    const was = v.owner;
+    v.hp = Math.max(1, v.maxHp * COMBAT.CRIT.abandonHp); v.owner = -1; v.order = { type: 'idle' }; v.path = null; v.speed = 0; v.queue = []; v.forceTarget = null;
+    event(G, was, 'lost', v.def.name + ' abandoned by its crew!', v.x, v.y);
+    popRecount(G);
+  }
+  function stepRecrew(G, sq) {
+    const v = G.byId.get(sq.order.target);
+    if (!v || v.dead || v.owner >= 0) { sq.order = { type: 'idle' }; return; }
+    const al = sq.models.filter(m => m.alive); if (!al.length) return;
+    const reach = v.def.length / 2 + 2;
+    if (Math.hypot(sq.x - v.x, sq.y - v.y) > reach && !al.some(m => Math.hypot(m.x - v.x, m.y - v.y) < reach)) { if (!sq.path || !sq.path.length) setPath(G, sq, v.x, v.y); return; }
+    const crew = Math.min(2, al.length);
+    for (const m of al.slice(-crew)) { m.alive = false; m.left = true; }
+    v.owner = sq.owner; v.order = { type: 'idle' }; v.xp = 0; v.vet = 0;
+    sq.order = { type: 'idle' }; sq.path = null; sq.slots = null;
+    (G.became = G.became || {})[sq.id] = v.id;
+    popRecount(G);
+    event(G, sq.owner, 'captured', (v.def.side !== G.players[sq.owner].side ? 'Captured ' : 'Recrewed ') + v.def.name, v.x, v.y);
+  }
   function stepDrops(G) {
     if (!G.drops || !G.drops.length) return;
     G.drops = G.drops.filter(d => d.hp > 0 && (d.kind === 'team' || G.t - d.t < DROPS.life));
@@ -768,8 +793,10 @@ const SIM = (() => {
     // a vehicle found inside an obstacle (a building raised round it, a wreck) is moved to open ground at once
     { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
     let target = null;
+    if (v.path && v.path.length && (v.owner < 0 || (v.crit && v.crit.engine === 2))) { v.path = null; if (v.order.type !== 'attack') v.order = { type: 'idle' }; }
     if (v.path && v.path.length && !(v.order.type === 'attackMove' && v.engageT > G.t)) target = v.path[0];
-    const accel = def.accel, maxSp = def.speed * (v.vet >= 3 && v.defId === 'us_chaffee' ? 1.33 : 1);
+    const eng = v.owner < 0 ? 0 : !v.crit ? 1 : v.crit.engine === 2 ? 0 : v.crit.engine === 1 ? .5 : 1;   // engine criticals; abandoned: nobody drives
+    const accel = def.accel * Math.max(.3, eng), maxSp = def.speed * eng * (v.vet >= 3 && v.defId === 'us_chaffee' ? 1.33 : 1);
     const grid = MAP.navGrids(G.map).veh, rot = def.rot * Math.PI / 180;
     // the next waypoint already in a straight, clear line: head for it now instead of driving into the corner
     if (target && v.path.length > 1 && (v.skipT = (v.skipT || 0) - dt) <= 0) {
@@ -956,6 +983,7 @@ const SIM = (() => {
         if (e.order.type === 'ability') stepAbility(G, e, dt);
         if (e.order.type === 'garrison') stepGarrisonOrder(G, e);
         if (e.order.type === 'pickup') stepPickup(G, e);
+        if (e.order.type === 'recrew') stepRecrew(G, e);
         if (e.garrison != null) stepGarrisoned(G, e, dt); else stepSquadMove(G, e, dt);
         stepSquadSupport(G, e, dt);
       } else if (e.type === 'vehicle') {
@@ -982,7 +1010,7 @@ const SIM = (() => {
     if (e.type === 'building') { stampBuilding(G, e, false); G.fx.push({ kind: 'boom', x: e.x, y: e.y, t: G.t, big: 2 }); if (e.def.cost) { const still = G.ents.some(b => b !== e && !b.dead && b.type === 'building' && b.owner === e.owner && b.defId === e.defId); if (!still) G.players[e.owner].built.delete(e.defId); } }
     if (e.type === 'vehicle') {
       G.wrecks = G.wrecks || [];
-      const w = { defId: e.defId, art: e.def.art, x: e.x, y: e.y, heading: e.heading, turret: e.turret, t: G.t, side: G.players[e.owner].side };
+      const w = { defId: e.defId, art: e.def.art, x: e.x, y: e.y, heading: e.heading, turret: e.turret, t: G.t, side: e.def.side };
       G.wrecks.push(w);
       const L = e.def.length * .5, c = Math.cos(e.heading), s = Math.sin(e.heading);
       G.map.addCover('wreck', e.x - c * L, e.y - s * L, e.x + c * L, e.y + s * L, { cover: 'heavy', blocksV: true, hp: 600 });
@@ -992,7 +1020,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, canCapture, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;

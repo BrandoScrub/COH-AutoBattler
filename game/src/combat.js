@@ -55,7 +55,7 @@ const COMBAT = (() => {
     e.candT = G.t + .4 + G.rng() * .15;
     const out = [], R = maxRangeOf(e) + 6;
     for (const o of G.ents) {
-      if (o.dead || o.owner === e.owner || o.owner < 0) continue;
+      if (o.dead || o.owner === e.owner || (o.owner < 0 && e.forceTarget !== o.id)) continue;
       if (o.type === 'building' && e.forceTarget !== o.id) continue;
       const d2 = U.dist2(o.x, o.y, e.x, e.y); if (d2 > R * R) continue;
       if (!FOG.visible(G, e.owner, o)) continue;
@@ -193,6 +193,8 @@ const COMBAT = (() => {
 
   /* ---------------- vehicles firing ---------------- */
   function vehicleFire(G, v, dt) {
+    if (v.owner < 0) return;                                   // abandoned: nobody inside
+    const shocked = v.crit && v.crit.shockT > G.t, gunOut = v.crit && v.crit.gun;
     const cands = candidates(G, v), vb = SIM.vetBonus(v);
     if (v.order.type === 'attack') {
       const t = G.byId.get(v.order.target);
@@ -207,6 +209,7 @@ const COMBAT = (() => {
     const main = D.W[v.weapons[0].id];
     v.weapons.forEach((ws, i) => {
       const w = D.W[ws.id]; ws.cd -= dt; ws.since += dt;
+      if (shocked || (i === 0 && gunOut)) { ws.cd = Math.max(ws.cd, .5); if (i === 0 && gunOut) return; }
       const turret = w.turret || (i > 0 && !w.arc);
       const t = pick(G, v, w, v.x, v.y, cands, turret ? null : v.heading, turret ? null : (w.arc || 30) / 2 * Math.PI / 180);
       if (i === 0) {
@@ -385,10 +388,30 @@ const COMBAT = (() => {
       if (!sq.models.some(q => q.alive)) { SIM.event(G, sq.owner, 'lost', sq.def.name + ' lost', sq.x, sq.y); if (src) xpFor(G, src, sq, sq.def.hp); }
     }
   }
+  /* Vehicle criticals (CoH3): a solid hit can damage or wreck the engine, knock out the main gun or shock the crew;
+     the lower the health, the likelier. A killing blow can instead make the crew bail out, leaving the vehicle
+     abandoned (neutral) for either side to recrew. Repairing to 90% clears the criticals. */
+  const CRIT = { base: .035, low: .22, minDmg: 30, minDmgLight: 12, shock: 6, abandon: .22, abandonHp: .08,
+    names: { engine1: 'Engine damaged', engine2: 'Immobilised', gun: 'Main gun destroyed', shock: 'Crew shocked' } };
+  function rollCrit(G, v, dmg) {
+    if (dmg < (v.def.light ? CRIT.minDmgLight : CRIT.minDmg)) return;
+    const hf = Math.max(0, v.hp / v.maxHp);
+    if (G.rng() > CRIT.base + CRIT.low * (1 - hf)) return;
+    const c = v.crit || (v.crit = { engine: 0, gun: false, shockT: 0 }), r = G.rng();
+    let what;
+    if (r < .45) { if (c.engine >= 2) return; c.engine = c.engine === 1 && hf < .5 ? 2 : 1; what = c.engine === 2 ? 'engine2' : 'engine1'; }
+    else if (r < .65) { if (c.gun || D.W[v.weapons[0].id].kind === 'small') return; c.gun = true; what = 'gun'; }
+    else { c.shockT = G.t + CRIT.shock; what = 'shock'; }
+    SIM.event(G, v.owner, 'lost', v.def.name + ': ' + CRIT.names[what], v.x, v.y);
+  }
   function damageVehicle(G, v, dmg, src) {
     if (v.dead) return;
     v.hp -= dmg; hurtEvent(G, v); xpFor(G, src, v, Math.min(dmg, v.hp + dmg));
-    if (v.hp <= 0) { SIM.event(G, v.owner, 'lost', v.def.name + ' destroyed', v.x, v.y); SIM.kill(G, v); }
+    if (v.hp <= 0) {
+      if (v.owner >= 0 && v.hp > -dmg * .6 && G.rng() < CRIT.abandon) { SIM.abandonVehicle(G, v); return; }
+      SIM.event(G, v.owner, 'lost', v.def.name + ' destroyed', v.x, v.y); SIM.kill(G, v); return;
+    }
+    rollCrit(G, v, dmg);
   }
   function damageBuilding(G, b, dmg, src) {
     if (b.dead) return;
@@ -396,6 +419,6 @@ const COMBAT = (() => {
     if (b.hp <= 0) { SIM.event(G, b.owner, 'lost', b.def.name + ' destroyed', b.x, b.y); SIM.kill(G, b); }
   }
 
-  return { step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
+  return { CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;
