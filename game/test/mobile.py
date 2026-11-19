@@ -49,6 +49,26 @@ async def main():
         await pg.tap('.card .slot:nth-child(12)'); await pg.wait_for_timeout(300)
         print('page after Construct tap', await pg.evaluate("() => HUD.ui.page"))
         await pg.screenshot(path='/tmp/shots/m2-build.png')
+        # place a Barracks by touch: tap its button, drag the outline to open ground, lift
+        await pg.tap('.card .slot:nth-child(5)'); await pg.wait_for_timeout(300)
+        print('mode after Barracks tap', await pg.evaluate("() => HUD.ui.mode && HUD.ui.mode.type"))
+        spot = await pg.evaluate("""() => { const hq = SIM.hqOf(G, 0); RENDER.cam.x = hq.x + 10; RENDER.cam.y = hq.y - 10;
+          for (let r = 16; r < 34; r += 2) for (let a = 0; a < 24; a++) { const x = hq.x + Math.cos(a / 24 * U.TAU) * r, y = hq.y + Math.sin(a / 24 * U.TAU) * r; if (!SIM.canPlace(G, 0, 'us_barracks', x, y)) { const s = RENDER.toScreen(x, y); if (s[0] > 300 && s[0] < 600 && s[1] > 80 && s[1] < 230) return s; } } return null; }""")
+        print('target spot', spot)
+        await pg.wait_for_timeout(200)
+        await touch('touchStart', [(422, 164)])
+        for i in range(1, 9): await touch('touchMove', [(422 + (spot[0] - 422) * i / 8, 164 + (spot[1] - 164) * i / 8)]); await pg.wait_for_timeout(16)
+        await pg.screenshot(path='/tmp/shots/m2b-ghost.png')
+        await touch('touchEnd', []); await pg.wait_for_timeout(300)
+        print('after drag-place', await pg.evaluate("() => G.ents.filter(e => e.owner === 0 && e.type === 'building').map(b => b.defId + ':' + b.built.toFixed(2))"), 'mode', await pg.evaluate("() => HUD.ui.mode"))
+        # and a plain tap on a bad spot (on the HQ) explains itself
+        await pg.evaluate("() => { HUD.ui.selected = new Set(G.ents.filter(e => e.type === 'squad' && e.owner === 0).map(e => e.id)); HUD.ui.page = 'build'; G.players[0].res = { mp: 900, mu: 100, fu: 200 }; }")
+        await pg.wait_for_timeout(200)
+        await pg.tap('.card .slot:nth-child(6)'); await pg.wait_for_timeout(200)
+        hq = await pg.evaluate("() => { const h = SIM.hqOf(G, 0); RENDER.cam.x = h.x; RENDER.cam.y = h.y; RENDER.cam.k = 1; return RENDER.toScreen(h.x, h.y); }")
+        await tap(hq[0], hq[1]); await pg.wait_for_timeout(200)
+        print('bad-spot banner:', await pg.evaluate("() => document.querySelector('.banner').textContent"), '| still placing:', await pg.evaluate("() => HUD.ui.mode && HUD.ui.mode.type"))
+        await pg.evaluate("() => { HUD.ui.mode = null; HUD.ui.page = 'main'; }")
         # minimap tap moves the camera
         box = await pg.locator('.mmframe canvas').bounding_box()
         await tap(box['x'] + box['width'] * .8, box['y'] + box['height'] * .5); await pg.wait_for_timeout(200)

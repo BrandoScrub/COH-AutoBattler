@@ -1,29 +1,51 @@
 # Tactical WW2 RTS
 
-A Company of Heroes style tactical RTS, American against German, 1944. This repository holds the game's units so
-far: 70 animated units (vehicles, crew weapons and infantry, both sides), modelled and exported with the art engine
-artkit (BrandoScrub/Game-Engine-System-Design) by its DESIGN_METHOD.md, and a first playable browser build in `game/`:
-1v1 skirmish against the AI with victory points, built to the CoH3 reference in `docs/reference/coh3/`.
+A Company of Heroes 3 style tactical RTS in the browser, American against German, Italy 1944. Playable now: a 1v1
+skirmish against the AI with victory points, on PC (mouse and keyboard) or a phone (touch). The 70 animated units
+(vehicles, crew weapons and infantry, both sides) are modelled and exported with the art engine artkit
+(BrandoScrub/Game-Engine-System-Design) by its DESIGN_METHOD.md; the HUD and rules follow the annotated CoH3
+reference in `docs/reference/coh3/`.
 
 ## Play
 Serve the repository root (`python3 -m http.server`) and open `game/index.html`, or build a folder for any static host
-with `python3 tools/build_web.py <out>`. Unit numbers come from CoH3 game data (coh3stats.com, patch 3.0.1), in
-`game/src/data.js`; units with no CoH3 counterpart in their slot are marked `standIn`. Player buildings are flat
-stand-ins until they are modelled. Tests: `node game/test/headless.js` (duels), `node game/test/aivsai.js us 20`
-(a whole match, AI against AI), `python3 game/test/flow.py de` (opening through real input in headless Chrome).
+with `python3 tools/build_web.py <out>` (`dist/` by default, ignored by git). Touch controls switch on by themselves on
+a phone; the menu's Controls option forces either mode.
+
+## Game code (`game/`)
+```
+game/index.html    page, HUD styles (desktop and phone), menus; loads artkit/runtime and src/ in order
+game/src/data.js   every number: weapons, squads, vehicles, buildings, defences, abilities, cover, economy
+game/src/map.js    the skirmish map: points, sectors, cover segments, houses, trees, line of sight, pathfinding
+game/src/sim.js    orders, movement, territory and supply, economy and upkeep, production, construction,
+                   reinforcement, retreat, veterancy, victory points (fixed 20 steps a second)
+game/src/combat.js targets, hits, directional cover, suppression, armour facing and penetration, explosions
+game/src/fog.js    fog of war with true line of sight
+game/src/ai.js     the skirmish opponent (either side)
+game/src/render.js isometric drawing with the artkit sprites; game-world markers
+game/src/hud.js    HUD, command card (QWER / ASDF / ZXCV), mouse, keyboard and touch input
+game/src/main.js   boot, menus, main loop
+game/test/         node: headless.js (duels), aivsai.js (one match), soak.js (many matches with invariant checks);
+                   headless Chrome: flow.py (opening by input), battle.py, browser.py, mobile.py (phone), restart.py
+```
+Unit numbers come from CoH3 game data (coh3stats.com, patch 3.0.1). Units with no CoH3 counterpart in their slot are
+marked `standIn` with the slot they fill. Player buildings are flat stand-ins until they are modelled, and battlegroups
+are structure only until they are designed.
+
+Before a commit that touches `game/`: `node game/test/soak.js 8 18` prints `no problems`, and `python3 game/test/flow.py de`
+and `python3 game/test/mobile.py` print `no page errors` (both need `python3 -m http.server 8765` running at the root).
 
 ## Layout
-Follows the engine's game layout (the gamekit README, engine PR #3), art side only for now:
 ```
 artkit/            the art engine, pinned (artkit/VENDORED.json: engine commit + every file's hash). Never edit here.
+game/              the browser game (above)
 models/            how each unit is drawn (Python): vehicles, infantry, crews, paint; roster.py lists them all
-data/units.json    every unit the game has: kind, side, name, headings, art key. build_art.py exports exactly these.
+data/units.json    the art roster: kind, side, name, headings, art key. build_art.py exports exactly these.
 styles/ww2/        the game's artkit style pack
 art/               the exports: assets.json, pack/ pages, crew_layout.json (committed: the game ships its art)
-tools/             build, check, preview and engine-update scripts (below)
+tools/             build, check, preview, engine-update and web-build scripts (below)
+docs/reference/    annotated Company of Heroes 3 screenshots: HUD, menus and battlefield reference (coh3/README.md)
 docs/previews/     review GIFs and sheets drawn from art/
 docs/sheets/       grey and colour review sheets of every vehicle and squad, play-size line-up (tools/build.py)
-docs/reference/     annotated Company of Heroes 3 screenshots: HUD, menus and battlefield reference (coh3/README.md)
 exports/obj/       every vehicle and squad as OBJ + MTL (metres, y up, flat colours) for other 3D tools (tools/build.py)
 ```
 
@@ -36,6 +58,7 @@ exports/obj/       every vehicle and squad as OBJ + MTL (metres, y up, flat colo
 - `python3 tools/build.py <out>`: grey review sheets of every vehicle and squad and an OBJ + MTL per model
   (what is in `docs/sheets/` and `exports/obj/`; rebuild into a scratch folder and copy over after changing a model).
 - `python3 tools/update_artkit.py <engine checkout>`: re-pin the engine; `--verify` checks the pinned copy.
+- `python3 tools/build_web.py [out]`: the game, its runtime and art in one folder for any static host.
 
 A new unit: model it in `models/` (brief first, `check()` empty), add it to `roster.py` and an entry in `data/units.json`,
 then `tools/build_art.py <its key>`. `build_art.py` refuses when data and models disagree.
@@ -184,5 +207,5 @@ Generated from `art/assets.json` by `python3 tools/list_units.py` (rerun it afte
 - The StuG has no side skirts (they would hide the wheels); the M10 turret top is a dark plate, not a real opening.
 - The pinned `artkit/preview.py` draws a wide top layer (a turret with a long gun) off its hull. The fix is on the engine's
   branch `fix-preview-top-layer`, not merged yet; re-pin after it is. `tools/preview_*.py` here never had the problem.
-- Game stats live in `game/src/data.js`, not in `data/units.json` (which stays the art roster).
-- No buildings modelled yet (HQ, production buildings, emplacements are drawn as flat stand-ins); battlegroups are structure only.
+- Game: buildings are flat stand-ins (no models yet); battlegroups are structure only; no garrisons, transports, mines or
+  off-map abilities yet; seven units fill CoH3 slots we have no art for (marked `standIn` in `game/src/data.js`).

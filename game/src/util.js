@@ -17,6 +17,8 @@ const U = (() => {
   const angTo = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
   /* turn angle a toward b by at most step */
   function turnTo(a, b, step) { const d = angNorm(b - a); return Math.abs(d) <= step ? b : a + Math.sign(d) * step; }
+  /* move a plain number toward a target by at most step (not an angle: no wrap-around) */
+  function approach(a, b, step) { return Math.abs(b - a) <= step ? b : a + Math.sign(b - a) * step; }
   /* value from a [near, mid, far] profile at distance d */
   function profile(arr, rng, d) {
     if (d <= rng[0]) return arr[0];
@@ -59,6 +61,6 @@ const U = (() => {
     }
   }
   const fmtTime = s => { s = Math.max(0, Math.floor(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
-  return { TAU, rng, clamp, lerp, dist, dist2, angNorm, angTo, turnTo, profile, segDist2, segX, Heap, fmtTime };
+  return { TAU, rng, clamp, lerp, dist, dist2, angNorm, angTo, turnTo, approach, profile, segDist2, segX, Heap, fmtTime };
 })();
 if (typeof module !== 'undefined') module.exports = U;

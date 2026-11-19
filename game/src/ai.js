@@ -126,7 +126,7 @@ const AI = (() => {
       // busy moving or fighting: let it be, but re-target now and then
       const busy = (e.path && e.path.length) || e.order.type === 'attack' || (e.crew && e.crew.state !== 'packed' && G.t - e.lastFire < 8) || (G.t - e.lastFire < 3);
       if (busy && G.rng() > .08) continue;
-      if (e.crew && e.crew.state === 'deployed' && G.rng() > .05) continue;
+      if (e.crew && e.crew.state !== 'packed' && G.rng() > .05) continue;
       // pick a goal: high value, near, not already crowded
       let best = null, bs = -1e9;
       for (const g of goals) {
@@ -141,7 +141,7 @@ const AI = (() => {
       const toward = enemyHq ? Math.atan2(enemyHq.y - p.y, enemyHq.x - p.x) : 0;
       let tx = p.x + G.rng.range(-4, 4), ty = p.y + G.rng.range(-4, 4);
       if (e.crew) { tx = p.x - Math.cos(toward) * 8; ty = p.y - Math.sin(toward) * 8; }
-      if (U.dist2(tx, ty, e.x, e.y) < 5 * 5 && p.owner === slot) continue;
+      if (U.dist2(tx, ty, e.x, e.y) < 6 * 6) continue;   // already there
       SIM.issue(G, [e.id], { type: e.crew ? 'move' : 'attackMove', x: tx, y: ty, face: toward });
     }
   }
