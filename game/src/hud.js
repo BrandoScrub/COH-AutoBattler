@@ -9,6 +9,8 @@ const HUD = (() => {
   let G, el = {}, canvasEl, iconCache = {}, cardSlots = [], lastPanelKey = '', tip = null;
 
   const $ = s => document.querySelector(s);
+  /* write a node's HTML only when it changed: rebuilding unchanged HUD parts ten times a second costs layout and image work on phones */
+  function put(node, html) { if (node._h !== html) { node.innerHTML = html; node._h = html; } }
   function h(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   const fmt = v => Math.floor(v).toString();
   const costStr = c => [c.mp ? `<span class="c-mp">${c.mp}</span>` : '', c.mu ? `<span class="c-mu">${c.mu}</span>` : '', c.fu ? `<span class="c-fu">${c.fu}</span>` : ''].join(' ');
@@ -184,7 +186,7 @@ const HUD = (() => {
     const vpS = D.ECON.vpStart;
     el.ticker.querySelector('.vp0 b').textContent = Math.ceil(P.vp); el.ticker.querySelector('.vp1 b').textContent = Math.ceil(E.vp);
     el.ticker.querySelector('.vp0 s').style.width = (P.vp / vpS * 100) + '%'; el.ticker.querySelector('.vp1 s').style.width = (E.vp / vpS * 100) + '%';
-    el.ticker.querySelector('.stars').innerHTML = G.map.points.filter(p => p.type === 'victory').map(p => `<span class="star o${p.owner}">&#9733;</span>`).join('');
+    put(el.ticker.querySelector('.stars'), G.map.points.filter(p => p.type === 'victory').map(p => `<span class="star o${p.owner}">&#9733;</span>`).join(''));
     el.ticker.querySelector('.clock').textContent = U.fmtTime(G.t);
     // resources
     const rs = el.bottom.querySelectorAll('.res');
@@ -193,7 +195,7 @@ const HUD = (() => {
     // tabs: one per production building type, lit when owned
     const tabs = el.bottom.querySelector('.tabs');
     const types = [P.F.hq, ...P.F.buildings], sel = primary();
-    tabs.innerHTML = '<div class="tab blank"></div>' + types.map(t => { const own = G.ents.some(b => b.type === 'building' && b.owner === 0 && b.defId === t && !b.dead); return `<div class="tab ${own ? 'own' : ''} ${sel && sel.defId === t ? 'on' : ''}" data-b="${t}" title="${D.BUILDINGS[t].name}"><img src="${glyphIcon(D.BUILDINGS[t].glyph)}"></div>`; }).join('');
+    put(tabs, '<div class="tab blank"></div>' + types.map(t => { const own = G.ents.some(b => b.type === 'building' && b.owner === 0 && b.defId === t && !b.dead); return `<div class="tab ${own ? 'own' : ''} ${sel && sel.defId === t ? 'on' : ''}" data-b="${t}" title="${D.BUILDINGS[t].name}"><img src="${glyphIcon(D.BUILDINGS[t].glyph)}"></div>`; }).join(''));
     updateAlerts(); updateRoster(); updatePanel(); updateCard();
     // command points dial (veterancy XP feeds it; nothing to spend yet)
     const xp = G.ents.filter(e => e.owner === 0 && e.type !== 'building').reduce((a, e) => a + (e.xp || 0), 0) + (P.xpBank || 0);
@@ -203,7 +205,7 @@ const HUD = (() => {
   function updateAlerts() {
     const P = G.players[0], now = G.t;
     const list = P.alerts.filter(a => now - a.t < 9).slice(-5);
-    el.alerts.innerHTML = list.map(a => `<div class="al ${a.kind}" data-x="${a.x}" data-y="${a.y}"><i></i>${a.text}</div>`).join('');
+    put(el.alerts, list.map(a => `<div class="al ${a.kind}" data-x="${a.x}" data-y="${a.y}"><i></i>${a.text}</div>`).join(''));
   }
   function updateRoster() {
     const units = G.ents.filter(e => e.owner === 0 && !e.dead && e.type !== 'building');
@@ -222,12 +224,12 @@ const HUD = (() => {
   function updatePanel() {
     const body = el.bottom.querySelector('.pbody'), pc = el.bottom.querySelector('.portrait'), sc = el.bottom.querySelector('.slotcol');
     const sel = selEnts();
-    if (!sel.length) { body.innerHTML = '<div class="empty">Nothing selected</div>'; pc.getContext('2d').clearRect(0, 0, 128, 128); sc.innerHTML = ''; lastPanelKey = ''; return; }
+    if (!sel.length) { put(body, '<div class="empty">Nothing selected</div>'); pc.getContext('2d').clearRect(0, 0, 128, 128); put(sc, ''); lastPanelKey = ''; return; }
     if (sel.length > 1) {
       const key = 'multi:' + sel.map(e => e.id).join(',');
-      body.innerHTML = `<div class="multi">${sel.slice(0, 18).map(e => `<div class="mt o${e.owner}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph || 'house')}"><b>${e.type === 'squad' ? e.models.filter(m => m.alive).length : ''}</b></div>`).join('')}</div>`;
+      put(body, `<div class="multi">${sel.slice(0, 18).map(e => `<div class="mt o${e.owner}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph || 'house')}"><b>${e.type === 'squad' ? e.models.filter(m => m.alive).length : ''}</b></div>`).join('')}</div>`);
       if (key !== lastPanelKey) { pc.getContext('2d').clearRect(0, 0, 128, 128); lastPanelKey = key; }
-      sc.innerHTML = ''; return;
+      put(sc, ''); return;
     }
     const e = sel[0], P = G.players[e.owner], own = e.owner === 0;
     const key = e.id + ':' + (e.crew ? e.crew.state : '') + ':' + (e.type === 'building' ? e.built >= 1 : '');
@@ -235,11 +237,11 @@ const HUD = (() => {
     const name = `<div class="own" style="color:${RENDER.TEAM[e.owner]}">${own ? 'You' : 'Enemy'} &middot; ${P.F.name}</div><h3>${e.def.name}</h3>`;
     if (e.type === 'building') {
       const hp = Math.max(0, e.hp / e.maxHp);
-      body.innerHTML = name + (e.def.reinforce ? '<div class="hl">Can reinforce infantry.</div>' : '') +
+      put(body, name + (e.def.reinforce ? '<div class="hl">Can reinforce infantry.</div>' : '') +
         `<div class="desc">${e.built < 1 ? 'Under construction: ' + Math.round(e.built * 100) + '%' : 'Produces: ' + e.def.produce.map(u => SIM.unitDef(u).name).join(', ') + '.'}</div>` +
         (own && e.queue.length ? `<div class="queue">${e.queue.map((q, i) => `<div class="qi" data-q="${i}" title="Click to cancel"><img src="${unitIcon(q.unit)}"><i style="width:${i ? 0 : Math.round(q.t / q.total * 100)}%"></i></div>`).join('')}</div>` : '') +
-        `<div class="hp"><i style="width:${hp * 100}%"></i><span>${Math.ceil(e.hp)} / ${e.maxHp}</span></div>`;
-      sc.innerHTML = own && e.def.retreat ? `<button class="toggle ${P.autoReinforce ? 'on' : ''}" data-act="reinforce" title="Automatic reinforcement: squads that have lost men refill near base buildings and pay manpower for each man. Toggle off to keep the manpower."><img src="${ico('reinforce')}"><span class="k">T</span></button>` : '';
+        `<div class="hp"><i style="width:${hp * 100}%"></i><span>${Math.ceil(e.hp)} / ${e.maxHp}</span></div>`);
+      put(sc, own && e.def.retreat ? `<button class="toggle ${P.autoReinforce ? 'on' : ''}" data-act="reinforce" title="Automatic reinforcement: squads that have lost men refill near base buildings and pay manpower for each man. Toggle off to keep the manpower."><img src="${ico('reinforce')}"><span class="k">T</span></button>` : '');
       return;
     }
     const th = e.def.vet || [1000, 3000, 6000], next = th[Math.min(2, e.vet)], prev = e.vet ? th[e.vet - 1] : 0;
@@ -250,13 +252,13 @@ const HUD = (() => {
     const cov = e.type === 'squad' ? COMBAT.squadCover(G, e) : null;
     const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.order.type === 'reverse' ? 'Reversing' : '');
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
-    body.innerHTML = name + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
+    put(body, name + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
       `<div class="line">${strength}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state">${state}</span>` : ''}</div>` +
       `<div class="weap">${weapons.join(' &middot; ')}</div>` +
       (e.type === 'vehicle' ? `<div class="armor">Armour ${e.def.armor.join(' / ')} (front / side / rear)</div>` : '') +
-      `<div class="hp"><i style="width:${Math.round(hpf * 100)}%"></i></div>`;
-    sc.innerHTML = (e.upgrades && e.upgrades.size ? [...e.upgrades].map(u => `<div class="eq" title="${(e.def.upgrades.find(x => x.id === u) || {}).name}"><img src="${ico(u === 'flame' ? 'flame' : 'lmg')}"></div>`).join('') : '');
+      `<div class="hp"><i style="width:${Math.round(hpf * 100)}%"></i></div>`);
+    put(sc, (e.upgrades && e.upgrades.size ? [...e.upgrades].map(u => `<div class="eq" title="${(e.def.upgrades.find(x => x.id === u) || {}).name}"><img src="${ico(u === 'flame' ? 'flame' : 'lmg')}"></div>`).join('') : ''));
   }
   function drawBuildingPortrait(cv, b) {
     const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
@@ -269,10 +271,10 @@ const HUD = (() => {
       b.classList.toggle('empty', !s); b.classList.toggle('dis', !!(s && s.disabled)); b.classList.toggle('done', !!(s && s.done));
       b.classList.toggle('armed', !!(s && ui.mode && ((ui.mode.type === 'attackMove' && i === 0) || (ui.mode.type === 'reverse' && i === 2))));
       const img = b.querySelector('img');
-      if (!s) { img.removeAttribute('src'); b.querySelector('.cd').textContent = ''; b.querySelector('.cost').innerHTML = ''; return; }
+      if (!s) { img.removeAttribute('src'); b.querySelector('.cd').textContent = ''; put(b.querySelector('.cost'), ''); return; }
       if (img.getAttribute('src') !== s.img) img.src = s.img;
       b.querySelector('.cd').textContent = s.cd > 0 ? Math.ceil(s.cd) : '';
-      b.querySelector('.cost').innerHTML = s.cost && !s.done ? costStr(s.cost) : '';
+      put(b.querySelector('.cost'), s.cost && !s.done ? costStr(s.cost) : '');
     });
     if (tip != null) { const s = slots[tip]; if (!s) hideTip(); }
   }

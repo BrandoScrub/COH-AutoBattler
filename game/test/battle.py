@@ -9,7 +9,7 @@ async def main():
         errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
         await pg.goto('http://localhost:8765/game/index.html')
         await pg.wait_for_function("!document.querySelector('#start').disabled", timeout=120000)
-        await pg.click('#start' if SIDE == 'us' else '#start2'); await pg.wait_for_timeout(500)
+        await pg.click('#mm-skirmish'); await pg.click('#start' if SIDE == 'us' else '#start2'); await pg.wait_for_timeout(500)
         await pg.evaluate("""() => {
           const us = G.players[0].side, de = G.players[1].side, P = (a, b) => a + '_' + b;
           const A = [['riflemen', 'grenadiers'], ['hmg', 'hmg'], ['sherman', 'pz4'], ['at_gun', 'at_gun'], ['m8', '222']];

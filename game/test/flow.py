@@ -9,7 +9,7 @@ async def main():
         errs = []; pg.on('pageerror', lambda e: errs.append(str(e) + ' @ ' + (e.stack or '').split(chr(10))[1:3].__str__()))
         await pg.goto('http://localhost:8765/game/index.html')
         await pg.wait_for_function("!document.querySelector('#start').disabled", timeout=120000)
-        await pg.click('#start' if SIDE == 'us' else '#start2'); await pg.wait_for_timeout(600)
+        await pg.click('#mm-skirmish'); await pg.click('#start' if SIDE == 'us' else '#start2'); await pg.wait_for_timeout(600)
         await pg.mouse.move(800, 400)
         # where to put the building: a free spot behind the HQ, in screen coordinates
         spot = await pg.evaluate("""(side) => { const hq = SIM.hqOf(G, 0), id = G.players[0].F.buildings[0];

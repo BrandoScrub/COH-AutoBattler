@@ -14,7 +14,7 @@ const MAP = (() => {
     const m = {
       w: W, h: H, block: new Uint8Array(W * H), area: new Uint8Array(W * H), road: new Uint8Array(W * H),
       covers: [], coverBuckets: new Map(), houses: [], trees: [], craters: [], fields: [], roads: [], points: [], sectors: [],
-      sectorGrid: null, bases: [], navDirty: true, version: 0,
+      sectorGrid: null, bases: [], navDirty: true, version: 0, seed: seed || 7,
     };
     const idx = (x, y) => y * W + x;
     const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;

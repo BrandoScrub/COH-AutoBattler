@@ -1,40 +1,91 @@
-/* Boot, menus and the main loop. The simulation runs at a fixed 20 steps a second; drawing runs every frame. */
+/* Boot, menus and the main loop. The simulation runs at a fixed 20 steps a second; drawing runs every frame.
+   Start-up loads everything before the main menu appears: all unit art (decoded to bitmaps), the battlefield
+   (map, ground texture, sectors) and every sprite page uploaded to the GPU, so a match starts at once and nothing
+   loads in the middle of a fight. The main menu draws that battlefield behind it with a slow camera drift. */
 const MAIN = (() => {
   const ART = (window.ART_BASE || '../art/');
-  let G = null, lib = {}, layout = null, assets = null, inMenu = true, last = 0, acc = 0, hudT = 0, mmT = 0, fogT = -1, running = false, speed = 1;
+  let G = null, BG = null, lib = {}, layout = null, assets = null, inMenu = true, last = 0, acc = 0, hudT = 0, mmT = 0, fogT = -1, speed = 1, side = 'us';
+  let screen = 'boot', back = 'main', ready = false;
   const $ = s => document.querySelector(s);
+  const CINE = { selected: new Set(), hover: null, noFog: true, cinematic: true };
 
+  /* ---------------- settings (kept in this browser) ---------------- */
+  const QUALITY = { high: { shadows: true, corpses: true }, balanced: { shadows: true, corpses: false }, low: { shadows: false, corpses: false } };
+  const set = { ctl: 'auto', quality: 'high', fps: false, speed: 1 };
+  try { Object.assign(set, JSON.parse(localStorage.getItem('tw2-settings') || '{}')); const c = localStorage.getItem('tw2-ctl'); if (c && !localStorage.getItem('tw2-settings')) set.ctl = c; } catch (e) {}
+  const save = () => { try { localStorage.setItem('tw2-settings', JSON.stringify(set)); } catch (e) {} };
+  function applySettings() {
+    Object.assign(RENDER.opt, QUALITY[set.quality] || QUALITY.high);
+    speed = +set.speed || 1;
+    $('#fps').classList.toggle('hide', !set.fps);
+    applyLayout();
+  }
+
+  /* ---------------- screens ---------------- */
+  function show(name) {
+    screen = name;
+    for (const id of ['boot', 'mainmenu', 'skirmish', 'howto', 'settings', 'deploy', 'pausemenu', 'end']) $('#' + id).classList.toggle('hide', id !== (name === 'main' ? 'mainmenu' : name));
+    inMenu = name !== 'game';
+    document.body.classList.toggle('menus', !G || name === 'main' || name === 'skirmish' || name === 'howto' || (name === 'settings' && back !== 'pausemenu'));
+  }
+  function menu(open) { if (!G) return; show(open ? 'pausemenu' : 'game'); }
+
+  /* ---------------- boot: load everything up front ---------------- */
+  function bar(f, text) { $('#bootbar i').style.width = (Math.max(0, Math.min(1, f)) * 100).toFixed(1) + '%'; if (text) $('#bootstatus').textContent = text; }
+  const frame = () => new Promise(r => requestAnimationFrame(() => r()));
   async function boot() {
-    const status = $('#loadstatus');
     try {
-      status.textContent = 'Loading unit art…';
+      bar(.02, 'Loading unit list…');
       [assets, layout] = await Promise.all([fetch(ART + 'assets.json').then(r => r.json()), fetch(ART + 'crew_layout.json').then(r => r.json())]);
-      let n = 0; const total = Object.keys(assets).length;
-      await new Promise(res => ArtKit.load(ART, assets, lib, () => res()));
-      // ArtKit.load fires once everything is in; count for the bar
-      status.textContent = 'Ready';
-      $('#start').disabled = false; $('#start2').disabled = false;
-    } catch (err) { status.textContent = 'Could not load the art: ' + err.message; console.error(err); }
+      const keys = Object.keys(assets); let done = 0;
+      bar(.04, `Loading unit art 0 / ${keys.length}`);
+      await new Promise(res => {
+        for (const k of keys) ArtKit.load(ART, { [k]: assets[k] }, lib, () => { done++; bar(.04 + .66 * done / keys.length, `Loading unit art ${done} / ${keys.length}`); if (done === keys.length) res(); });
+      });
+      bar(.72, 'Building the battlefield…'); await frame();
+      BG = SIM.create({ seed: 7, playerSide: 'us', crewLayout: layout });
+      RENDER.init($('#view'), lib, BG); resize();
+      bar(.78, 'Preparing textures…'); await frame();
+      const list = RENDER.warmList(lib); let i = 0;
+      while (i < list.length) { i = RENDER.warmStep(list, i, 48 * 1048576); bar(.78 + .21 * i / list.length, `Preparing textures ${i} / ${list.length}`); await frame(); }
+      bar(1, 'Ready');
+      ready = true;
+      $('#rendinfo').textContent = RENDER.isGL() ? 'Renderer: WebGL 2 (GPU batched)' : 'Renderer: 2D canvas (WebGL 2 unavailable; lower settings help)';
+      document.querySelectorAll('[data-needs-ready]').forEach(b => { b.disabled = false; });
+      show('main');
+      RENDER.cam.k = .62; RENDER.cam.x = 70; RENDER.cam.y = 150;
+    } catch (err) { bar(0, 'Could not load the game: ' + err.message); console.error(err); }
   }
 
-  function start(side) {
-    $('#menu').classList.add('hide'); $('#end').classList.add('hide');
-    G = SIM.create({ seed: 7, playerSide: side, crewLayout: layout });
-    window.G = G;
-    const canvas = $('#view');
-    if (!running) { RENDER.init(canvas, lib, G); } else { RENDER.init(canvas, lib, G); }
-    HUD.init(G, canvas);
-    HUD.ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
-    resize();
-    inMenu = false;
-    applyLayout.zoomed = false; applyLayout();
-    HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
-    if (!running) { running = true; last = performance.now(); requestAnimationFrame(loop); }
+  /* ---------------- a match ---------------- */
+  function start(s) {
+    if (!ready) return;
+    side = s || side;
+    show('deploy'); $('#deploy p').textContent = side === 'us' ? 'US Forces · Farm valley, Italy 1944' : 'Wehrmacht · Farm valley, Italy 1944';
+    setTimeout(() => {   // one frame for the overlay to show
+      G = SIM.create({ seed: 7, playerSide: side, crewLayout: layout });
+      window.G = G; acc = 0; fogT = -1;
+      const canvas = $('#view');
+      RENDER.init(canvas, lib, G);
+      HUD.init(G, canvas);
+      HUD.ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
+      HUD.ui.paused = false;
+      resize();
+      applyLayout.zoomed = false; applyLayout();
+      show('game');
+      HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
+    }, 30);
   }
-  /* touch mode: chosen in the menu, or automatic for coarse pointers and small screens */
-  let ctl = 'auto', rotOk = false;
-  try { ctl = localStorage.getItem('tw2-ctl') || 'auto'; } catch (e) {}
-  const isTouch = () => ctl === 'touch' || (ctl === 'auto' && ((matchMedia && matchMedia('(pointer: coarse)').matches) || Math.min(innerWidth, innerHeight) < 500));
+  function toMain() {
+    G = null; window.G = null; HUD.ui.paused = false;
+    RENDER.init($('#view'), lib, BG);
+    RENDER.cam.k = .62; RENDER.cam.x = 70; RENDER.cam.y = 150;
+    show('main');
+  }
+
+  /* touch mode: chosen in settings, or automatic for coarse pointers and small screens */
+  let rotOk = false;
+  const isTouch = () => set.ctl === 'touch' || (set.ctl === 'auto' && ((matchMedia && matchMedia('(pointer: coarse)').matches) || Math.min(innerWidth, innerHeight) < 500));
   function applyLayout() {
     const m = isTouch(), b = document.body;
     b.classList.toggle('mobile', m);
@@ -46,10 +97,20 @@ const MAIN = (() => {
   function resize() { const c = $('#view'); c.width = innerWidth; c.height = innerHeight; RENDER.resize(innerWidth, innerHeight, 1); applyLayout(); }
   addEventListener('resize', resize);
 
+  /* ---------------- main loop ---------------- */
+  let fpsN = 0, fpsT = 0, slow = 0;
   function loop(now) {
     requestAnimationFrame(loop);
     const dt = Math.min(.1, (now - last) / 1000); last = now;
-    if (!G) return;
+    fpsN++; fpsT += dt; if (fpsT >= .5) { if (set.fps) $('#fps').textContent = Math.round(fpsN / fpsT) + ' fps · ' + (RENDER.isGL() ? 'WebGL' : '2D'); fpsN = 0; fpsT = 0; }
+    if (!G) {
+      // menu backdrop: the battlefield, drifting; drawn at half rate to spare phones
+      if (!BG || !ready || (slow ^= 1)) return;
+      RENDER.cam.x += dt * 2 * 1.6; RENDER.cam.y -= dt * 2 * 1.6;
+      if (RENDER.cam.x > 150) { RENDER.cam.x = 70; RENDER.cam.y = 150; }
+      RENDER.frame(BG, CINE, 1);
+      return;
+    }
     if (!inMenu && !HUD.ui.paused && !G.over) {
       acc += dt * speed;
       let n = 0;
@@ -59,7 +120,7 @@ const MAIN = (() => {
     HUD.tick(dt);
     if (G.t !== fogT && ((G.t * 4) | 0) !== ((fogT * 4) | 0)) { RENDER.updateFogCanvas(G, 0); fogT = G.t; }
     const a = inMenu || HUD.ui.paused || G.over ? 1 : Math.min(1, acc / SIM.DT);
-    lerpIn(G, a); RENDER.frame(G, HUD.ui, a); lerpOut(G);
+    lerpIn(G, a); try { RENDER.frame(G, HUD.ui, a); } finally { lerpOut(G); }
     HUD.drawSelectBox();
     hudT -= dt; if (hudT <= 0) { HUD.update(); hudT = .1; }
     mmT -= dt; if (mmT <= 0) { HUD.drawMinimap(); mmT = .2; }
@@ -67,65 +128,72 @@ const MAIN = (() => {
   }
   /* Smooth drawing between simulation steps: remember where things were before each step, draw them partway
      from there to where they are now, then put the true values back so nothing outside drawing sees the blend. */
+  const EK = ['x', 'y', 'heading', 'turret'], MK = ['x', 'y', 'heading'];
+  function keep(o, keys) { const p = o.pv || (o.pv = [0, 0, 0, 0]); for (let i = 0; i < keys.length; i++) p[i] = o[keys[i]]; o.pvOk = true; }
   function snap(G) {
-    G.prevT = G.t;
     for (const e of G.ents) {
       if (e.dead || e.type === 'building') continue;
-      e.pv = [e.x, e.y, e.heading, e.turret];
-      if (e.models) for (const m of e.models) m.pv = [m.x, m.y, m.heading];
-      if (e.crew) e.crew.pv = [e.crew.x, e.crew.y, e.crew.heading];
+      keep(e, EK);
+      if (e.models) for (const m of e.models) keep(m, MK);
+      if (e.crew) keep(e.crew, MK);
     }
   }
-  let saved = [], savedT = null;
+  const saved = [];   // objects whose drawn values were blended, restored after drawing
   function blend(o, keys, a) {
-    const p = o.pv; if (!p) return;
-    const keep = keys.map(k => o[k]);
+    const p = o.pv; if (!o.pvOk) return;
     if (Math.abs(o.x - p[0]) + Math.abs(o.y - p[1]) > 4) return;   // a jump (spawn, teleport): draw where it is
-    keys.forEach((k, i) => {
-      if (p[i] == null || o[k] == null) return;
-      o[k] = k === 'x' || k === 'y' ? p[i] + (o[k] - p[i]) * a : p[i] + U.angNorm(o[k] - p[i]) * a;
-    });
-    saved.push(o, keys, keep);
+    const r = o.rv || (o.rv = [0, 0, 0, 0]);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i], v = o[k]; r[i] = v;
+      if (v == null || p[i] == null) continue;
+      o[k] = i < 2 ? p[i] + (v - p[i]) * a : p[i] + U.angNorm(v - p[i]) * a;
+    }
+    saved.push(o, keys);
   }
   function lerpIn(G, a) {
-    saved.length = 0; savedT = null;
-    if (a >= 1 || G.prevT == null) return;
-    savedT = G.t; G.t = G.prevT + (G.t - G.prevT) * a;
+    saved.length = 0;
+    if (a >= 1) return;
+    // positions and facings only: the clock stays put, so nothing is ever drawn at a time before it happened
     for (const e of G.ents) {
       if (e.dead || e.type === 'building') continue;
-      blend(e, ['x', 'y', 'heading', 'turret'], a);
-      if (e.models) for (const m of e.models) if (m.alive) blend(m, ['x', 'y', 'heading'], a);
-      if (e.crew) blend(e.crew, ['x', 'y', 'heading'], a);
+      blend(e, EK, a);
+      if (e.models) for (const m of e.models) if (m.alive) blend(m, MK, a);
+      if (e.crew) blend(e.crew, MK, a);
     }
   }
   function lerpOut(G) {
-    for (let i = 0; i < saved.length; i += 3) { const o = saved[i], keys = saved[i + 1], v = saved[i + 2]; keys.forEach((k, j) => { o[k] = v[j]; }); }
+    for (let i = 0; i < saved.length; i += 2) { const o = saved[i], keys = saved[i + 1], r = o.rv; for (let j = 0; j < keys.length; j++) o[keys[j]] = r[j]; }
     saved.length = 0;
-    if (savedT != null) { G.t = savedT; savedT = null; }
   }
   function showEnd() {
     const won = G.over.winner === 0, e = $('#end');
     e.querySelector('h2').textContent = won ? 'Victory' : 'Defeat';
     e.querySelector('p').textContent = G.over.reason + ' at ' + U.fmtTime(G.t) + '.';
-    e.classList.remove('hide');
-  }
-  function menu(show) {
-    if (!G) return;
-    inMenu = !!show; $('#pausemenu').classList.toggle('hide', !show);
+    show('end');
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    $('#start').addEventListener('click', () => start('us'));
-    $('#start2').addEventListener('click', () => start('de'));
-    $('#resume').addEventListener('click', () => menu(false));
-    $('#quit').addEventListener('click', () => { menu(false); $('#menu').classList.remove('hide'); inMenu = true; });
-    $('#again').addEventListener('click', () => { $('#end').classList.add('hide'); $('#menu').classList.remove('hide'); inMenu = true; });
-    $('#speed').addEventListener('change', ev => { speed = +ev.target.value; });
-    $('#ctl').value = ctl;
-    $('#ctl').addEventListener('change', ev => { ctl = ev.target.value; try { localStorage.setItem('tw2-ctl', ctl); } catch (e) {} applyLayout(); });
-    $('#rotok').addEventListener('click', () => { rotOk = true; applyLayout(); });
-    applyLayout();
+    const on = (id, f) => $(id).addEventListener('click', f);
+    on('#mm-skirmish', () => show('skirmish'));
+    on('#mm-howto', () => show('howto'));
+    on('#mm-settings', () => { back = 'main'; show('settings'); });
+    on('#start', () => start('us'));
+    on('#start2', () => start('de'));
+    document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => show(b.dataset.back === 'auto' ? back : b.dataset.back)));
+    on('#resume', () => menu(false));
+    on('#p-settings', () => { back = 'pausemenu'; show('settings'); });
+    on('#quit', () => toMain());
+    on('#again', () => toMain());
+    on('#rematch', () => start(side));
+    // settings
+    const bindSel = (id, key, cast) => { const el = $(id); el.value = String(set[key]); el.addEventListener('change', () => { set[key] = cast ? cast(el.value) : el.value; save(); applySettings(); }); };
+    bindSel('#ctl', 'ctl'); bindSel('#quality', 'quality'); bindSel('#speed', 'speed', Number);
+    $('#showfps').checked = !!set.fps; $('#showfps').addEventListener('change', ev => { set.fps = ev.target.checked; save(); applySettings(); });
+    on('#rotok', () => { rotOk = true; applyLayout(); });
+    applySettings();
+    show('boot');
+    last = performance.now(); requestAnimationFrame(loop);
     boot();
   });
-  return { menu, inMenu: () => inMenu, start };
+  return { menu, inMenu: () => inMenu, start, screen: () => screen };
 })();

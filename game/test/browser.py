@@ -15,7 +15,7 @@ async def main():
         await pg.goto(URL)
         await pg.wait_for_function("document.querySelector('#start') && !document.querySelector('#start').disabled", timeout=120000)
         await pg.screenshot(path=f'{OUT}/0-menu.png')
-        await pg.click('#start' if SIDE == 'us' else '#start2')
+        await pg.click('#mm-skirmish'); await pg.click('#start' if SIDE == 'us' else '#start2')
         await pg.wait_for_timeout(1500)
         await pg.screenshot(path=f'{OUT}/1-start.png')
         # fast-forward the sim inside the page

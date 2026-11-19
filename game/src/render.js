@@ -6,7 +6,7 @@ const RENDER = (() => {
   const ZOOM_MIN = .3;                     // how far out the camera goes (was .55)
   const PXM = 22, VZ = 24;                 // ground px per metre along an axis, screen px per metre of height
   const TEAM = ['#4aa3ff', '#ff5a4a'], TEAM_D = ['#1c4f86', '#86241c'];
-  const R = { cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
+  const R = { opt: { shadows: true, corpses: true }, cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
 
   /* ---------------- camera ---------------- */
   function toScreen(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
@@ -22,6 +22,9 @@ const RENDER = (() => {
       return U.lerp(U.lerp(v(xi, yi), v(xi + 1, yi), s(fx)), U.lerp(v(xi, yi + 1), v(xi + 1, yi + 1), s(fx)), s(fy)); };
   }
   function buildGround(G) {
+    // the ground depends only on the map, so a second match on the same map reuses it
+    if (R.ground && R.groundKey === G.map.seed + ':' + G.map.w) return;
+    R.groundKey = G.map.seed + ':' + G.map.w;
     const m = G.map, S = 8, c = canvas(m.w * S, m.h * S), g = c.getContext('2d');
     const n1 = noise2(11), n2 = noise2(23), n3 = noise2(37);
     const img = g.createImageData(c.width, c.height), d = img.data;
@@ -190,7 +193,7 @@ const RENDER = (() => {
     for (const h of G.map.houses) if (vis(h.x, h.y, 260)) list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
     for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) });
     for (const w of G.wrecks || []) if (vis(w.x, w.y, 200)) list.push({ d: w.x + w.y, f: () => drawWreck(G, c, w, k) });
-    for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
+    if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
     const shadows = [];
     for (const e of G.ents) {
       if (e.dead) continue;
@@ -202,7 +205,7 @@ const RENDER = (() => {
         drawSquadParts(G, e, k, list, shadows);
       }
     }
-    for (const s of shadows) s();
+    if (R.opt.shadows) for (const s of shadows) s();
     list.sort((a, b) => a.d - b.d);
     for (const o of list) o.f();
     drawProjectiles(G, c, k);
@@ -460,7 +463,7 @@ const RENDER = (() => {
   }
   function drawCorpse(G, c, cp, k) {
     const key = cp.side + '_' + cp.sprite, lib = R.lib[key];
-    const [sx, sy] = toScreen(cp.x, cp.y), age = G.t - cp.t0;
+    const [sx, sy] = toScreen(cp.x, cp.y), age = Math.max(0, G.t - cp.t0);
     if (!lib || !lib.m.clips.die) { c.fillStyle = 'rgba(40,40,30,.5)'; c.beginPath(); c.ellipse(sx, sy, 6 * k, 3 * k, 0, 0, U.TAU); c.fill(); return; }
     const die = lib.m.clips.die, fr = Math.min(die.frames - 1, Math.floor(age * die.fps));
     if (age > 40) c.globalAlpha = Math.max(0, 1 - (age - 40) / 20);
@@ -509,6 +512,7 @@ const RENDER = (() => {
 
   /* ---------------- overlay: rings, decorators, orders, ghosts ---------------- */
   function drawOverlay(G, c, k, ui) {
+    if (ui.cinematic) return;   // the main-menu backdrop: just the battlefield
     const sel = ui.selected;
     // selection rings and order lines
     for (const e of G.ents) {
@@ -654,5 +658,23 @@ const RENDER = (() => {
     return true;
   }
 
-  return Object.assign(R, { init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  /* Load-time GPU warm-up: draw every sprite page once, off screen, so each one is decoded and uploaded while the
+     loading bar is up instead of the first time that unit appears in a fight (a big tank sheet is ~25 MB). */
+  function warmList(lib) {
+    const out = [];
+    for (const key in lib) { const o = lib[key]; for (const k in o.img || {}) if (o.img[k]) out.push(o.img[k]); }
+    for (const k in R.sprites) { const v = R.sprites[k], cv = v && (v.c || v); if (cv && cv.width) out.push(cv); }
+    if (R.ground) out.push(R.ground);
+    return out;
+  }
+  function warmStep(list, from, budgetBytes) {
+    const c = R.ctx; let i = from, bytes = 0;
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1;
+    while (i < list.length && (bytes < budgetBytes || i === from)) { const b = list[i++]; c.drawImage(b, 0, 0, 1, 1, -8, -8, 1, 1); bytes += (b.width * b.height * 4) || 0; }
+    if (c.endFrame) c.endFrame();
+    return i;
+  }
+  const isGL = () => !!(R.ctx && R.ctx.endFrame);
+
+  return Object.assign(R, { warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();

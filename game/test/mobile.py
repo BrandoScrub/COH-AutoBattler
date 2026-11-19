@@ -15,7 +15,7 @@ async def main():
         await pg.goto(URL)
         await pg.wait_for_function("!document.querySelector('#start').disabled", timeout=120000)
         await pg.screenshot(path='/tmp/shots/m0-menu.png')
-        await pg.tap('#start'); await pg.wait_for_timeout(800)
+        await pg.tap('#mm-skirmish'); await pg.wait_for_timeout(200); await pg.screenshot(path='/tmp/shots/m0b-skirmish.png'); await pg.tap('#start'); await pg.wait_for_timeout(800)
         await pg.evaluate("() => { HUD.ui.paused = true; }")
         print('mobile class', await pg.evaluate("document.body.className"), await pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--s')"))
         await pg.screenshot(path='/tmp/shots/m1-start.png')
