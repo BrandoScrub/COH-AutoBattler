@@ -53,15 +53,55 @@ const MAIN = (() => {
     if (!inMenu && !HUD.ui.paused && !G.over) {
       acc += dt * speed;
       let n = 0;
-      while (acc >= SIM.DT && n++ < 8) { AI.step(G, 1); SIM.step(G, SIM.DT); acc -= SIM.DT; }
+      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); SIM.step(G, SIM.DT); acc -= SIM.DT; }
+      if (n > 8) acc = 0;
     }
     HUD.tick(dt);
     if (G.t !== fogT && ((G.t * 4) | 0) !== ((fogT * 4) | 0)) { RENDER.updateFogCanvas(G, 0); fogT = G.t; }
-    RENDER.frame(G, HUD.ui, 0);
+    const a = inMenu || HUD.ui.paused || G.over ? 1 : Math.min(1, acc / SIM.DT);
+    lerpIn(G, a); RENDER.frame(G, HUD.ui, a); lerpOut(G);
     HUD.drawSelectBox();
     hudT -= dt; if (hudT <= 0) { HUD.update(); hudT = .1; }
     mmT -= dt; if (mmT <= 0) { HUD.drawMinimap(); mmT = .2; }
     if (G.over && !G.overShown) { G.overShown = true; showEnd(); }
+  }
+  /* Smooth drawing between simulation steps: remember where things were before each step, draw them partway
+     from there to where they are now, then put the true values back so nothing outside drawing sees the blend. */
+  function snap(G) {
+    G.prevT = G.t;
+    for (const e of G.ents) {
+      if (e.dead || e.type === 'building') continue;
+      e.pv = [e.x, e.y, e.heading, e.turret];
+      if (e.models) for (const m of e.models) m.pv = [m.x, m.y, m.heading];
+      if (e.crew) e.crew.pv = [e.crew.x, e.crew.y, e.crew.heading];
+    }
+  }
+  let saved = [], savedT = null;
+  function blend(o, keys, a) {
+    const p = o.pv; if (!p) return;
+    const keep = keys.map(k => o[k]);
+    if (Math.abs(o.x - p[0]) + Math.abs(o.y - p[1]) > 4) return;   // a jump (spawn, teleport): draw where it is
+    keys.forEach((k, i) => {
+      if (p[i] == null || o[k] == null) return;
+      o[k] = k === 'x' || k === 'y' ? p[i] + (o[k] - p[i]) * a : p[i] + U.angNorm(o[k] - p[i]) * a;
+    });
+    saved.push(o, keys, keep);
+  }
+  function lerpIn(G, a) {
+    saved.length = 0; savedT = null;
+    if (a >= 1 || G.prevT == null) return;
+    savedT = G.t; G.t = G.prevT + (G.t - G.prevT) * a;
+    for (const e of G.ents) {
+      if (e.dead || e.type === 'building') continue;
+      blend(e, ['x', 'y', 'heading', 'turret'], a);
+      if (e.models) for (const m of e.models) if (m.alive) blend(m, ['x', 'y', 'heading'], a);
+      if (e.crew) blend(e.crew, ['x', 'y', 'heading'], a);
+    }
+  }
+  function lerpOut(G) {
+    for (let i = 0; i < saved.length; i += 3) { const o = saved[i], keys = saved[i + 1], v = saved[i + 2]; keys.forEach((k, j) => { o[k] = v[j]; }); }
+    saved.length = 0;
+    if (savedT != null) { G.t = savedT; savedT = null; }
   }
   function showEnd() {
     const won = G.over.winner === 0, e = $('#end');

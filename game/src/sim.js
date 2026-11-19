@@ -337,7 +337,8 @@ const SIM = (() => {
     if (!t || t.dead || t.hp >= t.maxHp || t.owner !== sq.owner) { sq.order = { type: 'idle' }; sq.building = false; return; }
     // distance to the target's edge: a building is wide, a vehicle a few metres long
     const half = t.type === 'building' ? Math.max(t.w, t.d) / 2 : (t.def.length || 4) / 2, d = Math.hypot(sq.x - t.x, sq.y - t.y) - half;
-    if (d > 6) { if (!sq.path || !sq.path.length || sq.repathT < G.t) { const p = t.type === 'building' ? nearEdge(sq, t) : t; setPath(G, sq, p.x, p.y); sq.repathT = G.t + 2; } sq.building = false; return; }
+    // walk in to 5 m, keep working out to 8 m: one threshold made the squad flip between walking and working at 6 m
+    if (d > (sq.building ? 8 : 5)) { if (!sq.path || !sq.path.length || sq.repathT < G.t) { const p = t.type === 'building' ? nearEdge(sq, t) : t; setPath(G, sq, p.x, p.y); sq.repathT = G.t + 2; } sq.building = false; return; }
     sq.path = null; sq.building = true; sq.buildAt = { x: t.x, y: t.y };
     t.hp = Math.min(t.maxHp, t.hp + (sq.def.repair || 8) * sq.models.filter(m => m.alive).length / sq.maxModels * dt * (sq.vet >= 2 ? 1.4 : 1));
   }

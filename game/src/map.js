@@ -21,7 +21,7 @@ const MAP = (() => {
     const mir = p => ({ ...p, x: p.y, y: p.x });
 
     /* ---- bases: side A (left of screen) and side B (right) ---- */
-    m.bases = [{ slot: 0, x: 26, y: 174, hq: { x: 26, y: 174 } }, { slot: 1, x: 174, y: 26, hq: { x: 174, y: 26 } }];
+    m.bases = [{ slot: 0, x: 30, y: 170, hq: { x: 30, y: 170 } }, { slot: 1, x: 170, y: 30, hq: { x: 170, y: 30 } }];
 
     /* ---- roads (symmetric polylines) ---- */
     m.roads = [
@@ -45,7 +45,7 @@ const MAP = (() => {
 
     /* ---- capture points ---- */
     const halfPoints = [
-      { type: 'standard', x: 40, y: 150 }, { type: 'standard', x: 80, y: 176 }, { type: 'munitions', x: 50, y: 112 },
+      { type: 'standard', x: 52, y: 146 }, { type: 'standard', x: 80, y: 176 }, { type: 'munitions', x: 50, y: 112 },
       { type: 'fuel', x: 112, y: 172 }, { type: 'standard', x: 84, y: 132 },
     ];
     let pid = 0;
@@ -55,7 +55,7 @@ const MAP = (() => {
 
     /* ---- reserved ground: bases, points, roads stay clear of scenery ---- */
     const clear = (x, y) => {
-      for (const b of m.bases) if (U.dist2(x, y, b.x, b.y) < 30 * 30) return false;
+      for (const b of m.bases) if (U.dist2(x, y, b.x, b.y) < 44 * 44) return false;
       for (const p of m.points) if (U.dist2(x, y, p.x, p.y) < 12 * 12) return false;
       if (inside(x | 0, y | 0) && m.road[idx(x | 0, y | 0)]) return false;
       return x > 3 && y > 3 && x < W - 3 && y < H - 3;
@@ -92,7 +92,7 @@ const MAP = (() => {
     };
     m.addCover = addCover;
     /* field walls and hedges stay out of the bases, so there is open ground to build on */
-    const nearBase = (ax, ay, bx, by) => m.bases.some(b => U.segDist2(b.x, b.y, ax, ay, bx, by) < 38 * 38);
+    const nearBase = (ax, ay, bx, by) => m.bases.some(b => U.segDist2(b.x, b.y, ax, ay, bx, by) < 50 * 50);
     const addBoth = (kind, ax, ay, bx, by, opts) => {
       if (!nearBase(ax, ay, bx, by)) addCover(kind, ax, ay, bx, by, opts);
       if (Math.abs(ax - ay) + Math.abs(bx - by) > 4 && !nearBase(ay, ax, by, bx)) addCover(kind, ay, ax, by, bx, opts);
@@ -228,15 +228,16 @@ const MAP = (() => {
   }
 
   /* ---- sectors: Voronoi of the points (plus a base sector round each HQ) on a 2 m grid ---- */
+  const BASE_R = 54;   // a base sector reaches at most this far from its HQ (CoH3 bases are a compact block round the HQ)
   function buildSectors(m) {
     const gw = m.w / SEC, gh = m.h / SEC, g = new Int16Array(gw * gh);
     const seeds = [];
-    m.bases.forEach((b, i) => { seeds.push({ x: b.x, y: b.y, base: i, w: .42 }); });
+    m.bases.forEach((b, i) => { seeds.push({ x: b.x, y: b.y, base: i, w: .28 }); });
     m.points.forEach(p => seeds.push({ x: p.x, y: p.y, point: p.id, w: 1 }));
     for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
       const wx = x * SEC + SEC / 2, wy = y * SEC + SEC / 2;
       let best = -1, bd = 1e18;
-      seeds.forEach((s, i) => { const d = U.dist2(wx, wy, s.x, s.y) * s.w; if (d < bd) { bd = d; best = i; } });
+      seeds.forEach((s, i) => { const r2 = U.dist2(wx, wy, s.x, s.y); if (s.base != null && r2 > BASE_R * BASE_R) return; const d = r2 * s.w; if (d < bd) { bd = d; best = i; } });
       g[y * gw + x] = best;
     }
     m.sectors = seeds.map((s, i) => ({ id: i, x: s.x, y: s.y, base: s.base == null ? -1 : s.base, point: s.point == null ? -1 : s.point, neigh: new Set(), owner: s.base == null ? -1 : s.base, cells: 0, cx: 0, cy: 0 }));

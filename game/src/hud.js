@@ -405,7 +405,7 @@ const HUD = (() => {
     if (k === 't' || k === 'T') { const p = primary(); if (p && p.type === 'building' && p.def.retreat) { slotColAct('reinforce'); return; } }
     const idx = KEYS.indexOf(k.toUpperCase());
     if (idx >= 0 && !e.ctrlKey && !e.metaKey) { pressSlot(idx); e.preventDefault(); return; }
-    if (k === '+' || k === '=') RENDER.cam.k *= 1.1; if (k === '-') RENDER.cam.k /= 1.1;
+    if (k === '+' || k === '=') { RENDER.cam.k *= 1.1; RENDER.clampCam(G); } if (k === '-') { RENDER.cam.k /= 1.1; RENDER.clampCam(G); }
     if (k === 'F12' && e.shiftKey) ui.noFog = !ui.noFog;
   }
   function leftUp(e) {

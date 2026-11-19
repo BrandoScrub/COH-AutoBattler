@@ -3,6 +3,7 @@
    World metres -> screen: sx = (x - y) * 22k, sy = (x + y) * 11k, the same frame the art was exported in
    (55 artkit units a metre at 0.4 px a unit = 22 px a metre at zoom k = 1). */
 const RENDER = (() => {
+  const ZOOM_MIN = .3;                     // how far out the camera goes (was .55)
   const PXM = 22, VZ = 24;                 // ground px per metre along an axis, screen px per metre of height
   const TEAM = ['#4aa3ff', '#ff5a4a'], TEAM_D = ['#1c4f86', '#86241c'];
   const R = { cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
@@ -10,7 +11,7 @@ const RENDER = (() => {
   /* ---------------- camera ---------------- */
   function toScreen(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
   function toWorld(sx, sy) { const c = R.cam, k = c.k; const a = (sx - R.W / 2) / (PXM * k) + (c.x - c.y), b = (sy - R.H / 2) / (PXM * .5 * k) + (c.x + c.y); return [(a + b) / 2, (b - a) / 2]; }
-  function clampCam(G) { const c = R.cam; c.x = U.clamp(c.x, 5, G.map.w - 5); c.y = U.clamp(c.y, 5, G.map.h - 5); c.k = U.clamp(c.k, .55, 1.6); }
+  function clampCam(G) { const c = R.cam; c.x = U.clamp(c.x, 5, G.map.w - 5); c.y = U.clamp(c.y, 5, G.map.h - 5); c.k = U.clamp(c.k, ZOOM_MIN, 1.6); }
 
   /* ---------------- one-off art: ground texture, trees, props, icons ---------------- */
   function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
@@ -420,7 +421,7 @@ const RENDER = (() => {
       if (full) pose = UnitKit.troopPose(lib, mem, { x: m.x * PXM * k, y: m.y * PXM * k, aim, t: G.t, since: m.since, inside: false, id: m.i + sq.id }, k);
       else {
         const moving = m.vx > .4, clips = lib.m.clips;
-        mem.d = (mem.d || 0) + (moving ? m.vx * SIM.DT : 0);
+        mem.d = (mem.d || 0) + (moving && mem.lx != null ? Math.min(2, Math.hypot(m.x - mem.lx, m.y - mem.ly)) : 0); mem.lx = m.x; mem.ly = m.y;
         let clip = moving && clips.walk ? 'walk' : 'idle';
         if (deployed && m.since < .6 && clips.fire) clip = 'fire';
         const fr = clip === 'walk' ? ArtKit.frameOf(lib.m, 'walk', G.t, mem.d * PXM * k, k) : clip === 'fire' ? Math.min(clips.fire.frames - 1, Math.floor(m.since * clips.fire.fps)) : ArtKit.frameOf(lib.m, 'idle', G.t + m.i * .37, null, k);
@@ -594,15 +595,27 @@ const RENDER = (() => {
       // suppression / pinned / retreat
       if (e.retreating) { c.fillStyle = '#ffcf5a'; c.beginPath(); c.moveTo(sx + 12, sy + 10); c.lineTo(sx + 20, sy + 4); c.lineTo(sx + 20, sy + 16); c.closePath(); c.fill(); }
       else if (e.suppState) { c.fillStyle = e.suppState === 2 ? '#ff4a3a' : '#ffb03a'; c.font = '800 12px Inter, system-ui'; c.fillText(e.suppState === 2 ? '!!' : '!', sx + 11, sy + 14); }
-      if (e.camo) { c.fillStyle = 'rgba(140,220,140,.9)'; c.font = '700 9px Inter'; c.fillText('camo', sx - 12, sy + 26 * s); }
+      if (e.camo) { c.fillStyle = 'rgba(140,220,140,.9)'; c.font = '700 9px Inter'; c.fillText('camo', sx - 12, sy + 33); }
       if (e.crew && (e.crew.state === 'setting' || e.crew.state === 'tearing')) { c.strokeStyle = '#ffd34d'; c.lineWidth = 2; c.beginPath(); c.arc(sx, sy - 2, 18 * s, -Math.PI / 2, -Math.PI / 2 + U.TAU * (1 - e.crew.t / ((SIM.weaponOf(e).setup || 2.5)))); c.stroke(); }
-      if (e.building) { c.fillStyle = '#8f8'; c.font = '700 9px Inter'; c.fillText('building', sx - 18, sy + 26 * s); }
+      if (e.building) { c.fillStyle = '#8f8'; c.font = '700 9px Inter'; c.fillText('building', sx - 18, sy + 33); }
     }
-    // health bar for damaged vehicles and buildings
-    if ((e.type === 'vehicle' || e.type === 'building') && e.hp < e.maxHp) {
-      const w = 34, f = Math.max(0, e.hp / e.maxHp); c.fillStyle = '#300'; c.fillRect(sx - w / 2, sy + 18, w, 4); c.fillStyle = f > .5 ? '#5c5' : f > .25 ? '#dc4' : '#d43'; c.fillRect(sx - w / 2, sy + 18, w * f, 4);
+    // health: squads get one segment a soldier (full slots, lost men shown empty), vehicles one bar, buildings when hurt
+    const hcol = f => f > .6 ? '#5c5' : f > .3 ? '#dc4' : '#d43';
+    if (e.type === 'squad') {
+      const n = e.maxModels, gap = 2, w = Math.max(30, Math.min(44, n * 8)), sw = (w - gap * (n - 1)) / n, x0 = sx - w / 2, y0 = sy + 18;
+      c.fillStyle = 'rgba(0,0,0,.75)'; c.fillRect(x0 - 1, y0 - 1, w + 2, 6);
+      for (let i = 0; i < n; i++) {
+        const m = e.models[i], f = m && m.alive ? Math.max(0, m.hp / (m.maxHp || e.def.hp)) : 0, x = x0 + i * (sw + gap);
+        c.fillStyle = '#3a1512'; c.fillRect(x, y0, sw, 4);
+        if (f > 0) { c.fillStyle = hcol(f); c.fillRect(x, y0, sw * f, 4); }
+      }
+    } else if (e.type === 'vehicle' || (e.type === 'building' && e.hp < e.maxHp)) {
+      const w = e.type === 'vehicle' ? 40 : 34, f = Math.max(0, e.hp / e.maxHp);
+      c.fillStyle = 'rgba(0,0,0,.75)'; c.fillRect(sx - w / 2 - 1, sy + 17, w + 2, 7);
+      c.fillStyle = '#3a1512'; c.fillRect(sx - w / 2, sy + 18, w, 5); c.fillStyle = hcol(f); c.fillRect(sx - w / 2, sy + 18, w * f, 5);
+      if (e.type === 'vehicle') { c.fillStyle = 'rgba(0,0,0,.55)'; for (let q = 1; q < 4; q++) c.fillRect(sx - w / 2 + w * q / 4, sy + 18, 1, 5); }
     }
-    if (e.type === 'building' && e.built < 1) { const w = 34; c.fillStyle = '#222'; c.fillRect(sx - w / 2, sy + 24, w, 4); c.fillStyle = '#8cf'; c.fillRect(sx - w / 2, sy + 24, w * e.built, 4); }
+    if (e.type === 'building' && e.built < 1) { const w = 34; c.fillStyle = '#222'; c.fillRect(sx - w / 2, sy + 25, w, 4); c.fillStyle = '#8cf'; c.fillRect(sx - w / 2, sy + 24, w * e.built, 4); }
     // control group
     if (e.owner === 0 && ui.groupOf) { const g = ui.groupOf(e.id); if (g) { c.fillStyle = '#111'; c.fillRect(sx - 6, sy - 40, 12, 13); c.fillStyle = '#eee'; c.font = '700 10px Inter'; c.textAlign = 'center'; c.fillText(g, sx, sy - 30); c.textAlign = 'left'; } }
   }
