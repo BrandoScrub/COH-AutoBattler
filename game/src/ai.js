@@ -83,7 +83,7 @@ const AI = (() => {
       const ang = a / 16 * U.TAU, x = hq.x + Math.cos(ang) * r, y = hq.y + Math.sin(ang) * r;
       // keep behind the HQ (away from the enemy) where possible
       if ((x - y) * dir > (hq.x - hq.y) * dir + 18) continue;
-      if (!SIM.canPlace(G, slot, defId, x, y)) return { x, y };
+      if (!SIM.canPlace(G, slot, defId, x, y) && !SIM.sealsBase(G, slot, defId, x, y)) return { x, y };
     }
     return null;
   }

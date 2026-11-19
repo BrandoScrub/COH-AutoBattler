@@ -101,6 +101,27 @@ const SIM = (() => {
     return null;
   }
 
+  /* would a building here wall vehicles off from any of this owner's buildings (the new one included)? used by the AI */
+  function sealsBase(G, owner, defId, x, y) {
+    const def = D.BUILDINGS[defId], m = G.map, saved = m.block.slice(), savedNav = m.nav, savedDirty = m.navDirty;
+    const b = { x, y, w: def.size[0], d: def.size[1] };
+    for (let yy = Math.floor(y - b.d / 2); yy < Math.ceil(y + b.d / 2); yy++) for (let xx = Math.floor(x - b.w / 2); xx < Math.ceil(x + b.w / 2); xx++) m.block[yy * m.w + xx] |= MAP.BI | MAP.BV;
+    m.navDirty = true;
+    const grid = MAP.navGrids(m).veh, reach = MAP.mainRegion(m, true);
+    const blds = G.ents.filter(e => e.type === 'building' && !e.dead && e.owner === owner).map(e => ({ x: e.x, y: e.y, w: e.w, d: e.d })).concat([b]);
+    let sealed = false;
+    for (const B of blds) {
+      let out = false;
+      for (let a = 0; a < 24 && !out; a++) for (let r = 2; r <= 6 && !out; r += 2) {
+        const ang = a / 24 * U.TAU, px = B.x + Math.cos(ang) * (B.w * .5 + r), py = B.y + Math.sin(ang) * (B.d * .5 + r);
+        if (MAP.walkable(grid, m, px, py) && reach[(py | 0) * m.w + (px | 0)]) out = true;
+      }
+      if (!out) { sealed = true; break; }
+    }
+    m.block.set(saved); m.nav = savedNav; m.navDirty = savedDirty;
+    return sealed;
+  }
+
   function popRecount(G) {
     for (const p of G.players) { p.pop = 0; p.upkeep = 0; }
     for (const e of G.ents) {
@@ -299,7 +320,7 @@ const SIM = (() => {
         const ang = Math.atan2(b.rally.y - b.y, b.rally.x - b.x);
         const sx = b.x + Math.cos(ang) * (b.w * .5 + 2), sy = b.y + Math.sin(ang) * (b.d * .5 + 2);
         const isV = !D.SQUADS[q.unit], nav = MAP.navGrids(G.map);
-        const p = MAP.nearestOpen(isV ? nav.veh : nav.inf, G.map, sx, sy);   // vehicles need ground a vehicle can use
+        const p = MAP.nearestOpen(isV ? nav.veh : nav.inf, G.map, sx, sy, MAP.mainRegion(G.map, isV));   // ground a vehicle can use, joined to the battlefield
         const e = isV ? spawnVehicle(G, q.unit, b.owner, p.x, p.y, ang) : spawnSquad(G, q.unit, b.owner, p.x, p.y);
         orderEnt(G, e, { type: 'move', x: b.rally.x + G.rng.range(-3, 3), y: b.rally.y + G.rng.range(-3, 3) });
         event(G, b.owner, 'ready', e.def.name + ' ready', e.x, e.y);
@@ -891,7 +912,9 @@ const SIM = (() => {
       while (stack.length) { const S = stack.pop(); S.supplied = true; for (const n of S.neigh) { const N = m.sectors[n]; if (!seen.has(n) && N.owner === P.slot) { seen.add(n); stack.push(N); } } }
     }
   }
+  // CoH3: an enemy point can be neutralised anywhere; only taking a neutral point needs a sector next to your supplied territory
   function canCapture(G, slot, p) {
+    if (p.owner >= 0 && p.owner !== slot) return true;
     const S = G.map.sectors[p.sector];
     for (const n of S.neigh) { const N = G.map.sectors[n]; if (N.owner === slot && N.supplied) return true; }
     return false;
@@ -1039,7 +1062,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, canCapture, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
