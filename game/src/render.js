@@ -11,7 +11,9 @@ const RENDER = (() => {
   /* ---------------- camera ---------------- */
   /* world (x, y) and a height z above the ground there -> screen. The terrain height is added, so everything placed on
      the ground sits on the hills; toScreenFlat ignores terrain (for the ground and fog transforms). */
-  const hGround = (x, y) => R.G && R.G.map && R.G.map.hgt ? MAP.hAt(R.G.map, x, y) : 0;
+  // drawn height is exaggerated so a 5 m rise reads at a glance from the camera's height; the rules use true heights
+  const EXAG = 1.7;
+  const hGround = (x, y) => R.G && R.G.map && R.G.map.hgt ? MAP.hAt(R.G.map, x, y) * EXAG : 0;
   function toScreenFlat(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
   function toScreen(x, y, z) { return toScreenFlat(x, y, (z || 0) + hGround(x, y)); }
   function toWorldFlat(sx, sy) { const c = R.cam, k = c.k; const a = (sx - R.W / 2) / (PXM * k) + (c.x - c.y), b = (sy - R.H / 2) / (PXM * .5 * k) + (c.x + c.y); return [(a + b) / 2, (b - a) / 2]; }
@@ -45,22 +47,44 @@ const RENDER = (() => {
       const im = new Image(); im.onload = () => { R.tiles[n] = im; res(); }; im.onerror = () => res(); im.src = base + n + '.jpg';
     })));
   }
-  /* hill shading and faint contour lines baked over the ground texture, so slopes read at a glance */
+  /* Hill shading baked over the ground texture: slopes away from the light (upper left) darken, slopes toward it and
+     the tops warm up, and contour lines mark every metre (stronger every 3 m), so the shape of the ground reads at a
+     glance. Drawn as one transparent layer over the painted ground. */
   function shadeGround(G, ground, S) {
     const m = G.map; if (!m.hgt) return;
     const P = 3, W = m.w * P, H = m.h * P, sc = canvas(W, H), sg = sc.getContext('2d'), img = sg.createImageData(W, H), d = img.data;
-    const L = [-.55, -.35, .76], Ln = Math.hypot(...L), lx = L[0] / Ln, ly = L[1] / Ln, lz = L[2] / Ln, flat = lz;
+    const L = [-.6, -.45, .66], Ln = Math.hypot(...L), lx = L[0] / Ln, ly = L[1] / Ln, lz = L[2] / Ln, flat = lz;
+    const band = (x, y, step) => Math.floor(MAP.hAt(m, x, y) / step);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const wx = (x + .5) / P, wy = (y + .5) / P, h = MAP.hAt(m, wx, wy);
-      const dx = (MAP.hAt(m, wx + .5, wy) - MAP.hAt(m, wx - .5, wy)), dy = (MAP.hAt(m, wx, wy + .5) - MAP.hAt(m, wx, wy - .5));
+      const dx = (MAP.hAt(m, wx + .5, wy) - MAP.hAt(m, wx - .5, wy)) * 2.2, dy = (MAP.hAt(m, wx, wy + .5) - MAP.hAt(m, wx, wy - .5)) * 2.2;
       const n = Math.hypot(dx, dy, 1), lum = (-dx * lx - dy * ly + lz) / n / flat;
-      const i = (y * W + x) * 4, g = U.clamp(128 + (lum - 1) * 150, 70, 180);
-      // a contour every 1.5 m
-      const band = Math.floor(h / 1.5), edge = h > .3 && (Math.floor(MAP.hAt(m, wx + .34, wy) / 1.5) !== band || Math.floor(MAP.hAt(m, wx, wy + .34) / 1.5) !== band);
-      d[i] = d[i + 1] = d[i + 2] = edge ? g - 16 : g; d[i + 3] = 255;
+      let r, g, bl, a;
+      if (lum < 1) { r = 22; g = 16; bl = 8; a = Math.min(.5, (1 - lum) * 1.25); }
+      else { r = 255; g = 238; bl = 196; a = Math.min(.24, (lum - 1) * 1.1); }
+      // the higher, the warmer and lighter
+      if (h > .8) { const ta = Math.min(.18, (h - .8) * .035); r = r * (1 - ta) + 255 * ta; g = g * (1 - ta) + 236 * ta; bl = bl * (1 - ta) + 180 * ta; a = a + ta * (1 - a); }
+      // contours: every metre, every third stronger
+      if (h > .4) {
+        const e1 = band(wx + .34, wy, 1) !== band(wx, wy, 1) || band(wx, wy + .34, 1) !== band(wx, wy, 1);
+        if (e1) { const major = band(wx + .34, wy, 3) !== band(wx, wy, 3) || band(wx, wy + .34, 3) !== band(wx, wy, 3), ca = major ? .42 : .22; r = r * (1 - ca) + 40 * ca; g = g * (1 - ca) + 30 * ca; bl = bl * (1 - ca) + 18 * ca; a = a + ca * (1 - a); }
+      }
+      const i = (y * W + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = bl; d[i + 3] = a * 255;
     }
     sg.putImageData(img, 0, 0);
-    const g2 = ground.getContext('2d'); g2.save(); g2.globalCompositeOperation = 'soft-light'; g2.imageSmoothingEnabled = true; g2.drawImage(sc, 0, 0, ground.width, ground.height); g2.restore();
+    const g2 = ground.getContext('2d'); g2.save(); g2.imageSmoothingEnabled = true; g2.drawImage(sc, 0, 0, ground.width, ground.height); g2.restore();
+  }
+  /* the height view (H): the ground coloured by elevation in 1 m bands, green low to red-brown high, with contours */
+  function buildHeightView(G) {
+    const m = G.map, P = 4, W = m.w * P, H = m.h * P, c = canvas(W, H), g = c.getContext('2d'), img = g.createImageData(W, H), d = img.data;
+    const ramp = [[54, 110, 60], [104, 150, 64], [180, 180, 70], [222, 170, 66], [214, 120, 52], [170, 72, 44], [120, 46, 40]];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const wx = (x + .5) / P, wy = (y + .5) / P, h = MAP.hAt(m, wx, wy), b = Math.min(ramp.length - 1, Math.floor(h)), col = ramp[b];
+      const edge = Math.floor(MAP.hAt(m, wx + .25, wy)) !== Math.floor(h) || Math.floor(MAP.hAt(m, wx, wy + .25)) !== Math.floor(h);
+      const i = (y * W + x) * 4; d[i] = edge ? 30 : col[0]; d[i + 1] = edge ? 24 : col[1]; d[i + 2] = edge ? 16 : col[2]; d[i + 3] = edge ? 190 : 125;
+    }
+    g.putImageData(img, 0, 0);
+    R.heightC = c; R.heightKey = m.seed + ':' + m.w;
   }
   function buildGround(G) {
     // the ground depends only on the map, so a second match on the same map reuses it
@@ -293,6 +317,7 @@ const RENDER = (() => {
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
     // ground: tilted tiles that follow the terrain, back to front (texture px at R.groundS px a metre)
     drawTerrain(G, c, k, R.ground, R.groundS || 8);
+    if (ui.heightView) { if (R.heightKey !== G.map.seed + ':' + G.map.w) buildHeightView(G); drawTerrain(G, c, k, R.heightC, 4, true); }
     const vis = (x, y, pad) => { const [sx, sy] = toScreen(x, y); return sx > -pad && sx < R.W + pad && sy > -pad && sy < R.H + pad * 1.5; };
     // craters
     c.fillStyle = 'rgba(58,46,30,.55)';
@@ -354,17 +379,17 @@ const RENDER = (() => {
   }
   function drawTerrain(G, c, k, img, S, seamless) {
     const m = G.map, key = m.seed + ':' + m.w;
-    if (R.tileKey !== key) { R.tileKey = key; R.tilesFine = terrainTiles(G, .06, 4); R.tilesCoarse = terrainTiles(G, .2, 8); }
+    if (R.tileKey !== key) { R.tileKey = key; R.tilesFine = terrainTiles(G, .04, 4); R.tilesCoarse = terrainTiles(G, .12, 8); }
     // the 2D fallback rasterises on the CPU: fewer, larger tiles there
     const list = k >= .6 && R.ctx && R.ctx.endFrame ? R.tilesFine : R.tilesCoarse, ax = PXM * k / S, bx = -PXM * k / S, mar = 16 * PXM * k;
     let n = 0;
     for (const t of list) {
-      const wcx = t.x0 + t.T / 2, wcy = t.y0 + t.T / 2, [sx, sy] = toScreenFlat(wcx, wcy, t.hc);
+      const wcx = t.x0 + t.T / 2, wcy = t.y0 + t.T / 2, [sx, sy] = toScreenFlat(wcx, wcy, t.hc * EXAG);
       if (sx < -mar || sx > R.W + mar || sy < -mar || sy > R.H + mar) continue;
       // texture px u -> world x = u / S; screen = tile centre + d(screen)/d(world) * (world - centre)
-      const ay = (PXM * .5 * k - VZ * k * t.gx) / S, by = (PXM * .5 * k - VZ * k * t.gy) / S;
+      const ay = (PXM * .5 * k - VZ * k * t.gx * EXAG) / S, by = (PXM * .5 * k - VZ * k * t.gy * EXAG) / S;
       c.setTransform(ax, ay, bx, by, sx - (ax * wcx * S + bx * wcy * S), sy - (ay * wcx * S + by * wcy * S));
-      const pad = seamless ? 0 : Math.min(.3, t.T * .04), u0 = (t.x0 - pad) * S, v0 = (t.y0 - pad) * S, uw = (t.T + 2 * pad) * S;
+      const pad = seamless ? 0 : .7, u0 = (t.x0 - pad) * S, v0 = (t.y0 - pad) * S, uw = (t.T + 2 * pad) * S;
       const su = Math.max(0, u0), sv = Math.max(0, v0), sw = Math.min(img.width, u0 + uw) - su, sh = Math.min(img.height, v0 + uw) - sv;
       if (sw > 0 && sh > 0) { c.drawImage(img, su, sv, sw, sh, su, sv, sw, sh); n++; }
     }
@@ -886,5 +911,5 @@ const RENDER = (() => {
   }
   const isGL = () => !!(R.ctx && R.ctx.endFrame);
 
-  return Object.assign(R, { toScreenFlat, toWorldFlat, hGround, loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  return Object.assign(R, { EXAG, toScreenFlat, toWorldFlat, hGround, loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();
