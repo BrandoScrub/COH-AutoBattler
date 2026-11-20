@@ -361,6 +361,7 @@ const SIM = (() => {
         sq.reachT = (sq.reachT || 0) + dt; if (sq.reachT > 20) { sq.reachT = 0; sq.buildQueue.shift(); event(G, sq.owner, 'error', 'Engineers cannot reach the construction site', px, py); continue; }
         if (!sq.path || !sq.path.length) { const side = job.kind === 'building' ? nearEdge(sq, tgt) : { x: px - Math.sin(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6, y: py + Math.cos(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6 }; setPath(G, sq, side.x, side.y); } return true; }
       sq.path = null; sq.building = true; sq.buildAt = { x: px, y: py }; sq.reachT = 0;
+      setWork(sq, job.kind === 'building' ? { kind: 'box', x: tgt.x, y: tgt.y, hw: tgt.w / 2, hd: tgt.d / 2 } : { kind: 'seg', ax: tgt.ax, ay: tgt.ay, bx: tgt.bx, by: tgt.by, x: px, y: py });
       const vb = sq.vet >= 2 ? 1.35 : 1, rate = dt * vb * Math.max(.4, sq.models.filter(m => m.alive).length / sq.maxModels);
       if (job.kind === 'building') {
         tgt.built = Math.min(1, tgt.built + rate / tgt.def.time); tgt.hp = Math.min(tgt.maxHp, tgt.hp + tgt.maxHp * .9 * rate / tgt.def.time);
@@ -386,6 +387,7 @@ const SIM = (() => {
     // walk in to 5 m, keep working out to 8 m: one threshold made the squad flip between walking and working at 6 m
     if (d > (sq.building ? 8 : 5)) { if (!sq.path || !sq.path.length || sq.repathT < G.t) { const p = t.type === 'building' ? nearEdge(sq, t) : t; setPath(G, sq, p.x, p.y); sq.repathT = G.t + 2; } sq.building = false; return; }
     sq.path = null; sq.building = true; sq.buildAt = { x: t.x, y: t.y };
+    setWork(sq, t.type === 'building' ? { kind: 'box', x: t.x, y: t.y, hw: t.w / 2, hd: t.d / 2 } : { kind: 'ring', x: t.x, y: t.y, r: half });
     t.hp = Math.min(t.maxHp, t.hp + (sq.def.repair || 8) * sq.models.filter(m => m.alive).length / sq.maxModels * dt * (sq.vet >= 2 ? 1.4 : 1));
     if (t.type === 'vehicle' && t.crit && t.hp >= t.maxHp * .9) { t.crit = null; event(G, t.owner, 'built', t.def.name + ' repaired: criticals fixed', t.x, t.y); }
   }
@@ -664,7 +666,8 @@ const SIM = (() => {
       if (!sq.path.length) arrive(G, sq);
     }
     // slots: where each model stands
-    if (!moving && !sq.slots) sq.slots = holdSlots(G, sq);
+    if (!sq.building && sq.work) { sq.work = null; sq.workKey = null; sq.slots = null; }   // job done: back to a fire line
+    if (!moving && !sq.slots) sq.slots = sq.building && sq.work ? workSlots(G, sq) : holdSlots(G, sq);
     const slotsFor = moving ? null : sq.slots;
     const speed = Math.max(1.5, squadSpeed(sq) * 1.15 || (sq.crew && sq.crew.state !== 'packed' ? 3 : 0));
     let k = 0;
@@ -699,7 +702,7 @@ const SIM = (() => {
         if (MAP.walkable(nav, G.map, nx, ny) || !MAP.walkable(nav, G.map, m.x, m.y)) { m.x = nx; m.y = ny; }
         else { m.x = U.lerp(m.x, sq.x, .2); m.y = U.lerp(m.y, sq.y, .2); }
         if (step > .01) m.heading = Math.atan2(dy, dx);
-      } else if (slotsFor && sq.holdFace != null) m.heading = U.turnTo(m.heading, sq.holdFace, 4 * dt);   // in place: face the way the line faces
+      } else if (slotsFor && (slotsFor[k].a != null || sq.holdFace != null)) m.heading = U.turnTo(m.heading, slotsFor[k].a != null ? slotsFor[k].a : sq.holdFace, 4 * dt);   // in place: face the job, or the way the line faces
       m.vx = step / dt;
       // safety net: a man left inside an obstacle (a building raised on him, a wall built through him) steps out
       if (!MAP.walkable(nav, G.map, m.x, m.y) && !(sq.crew && sq.crew.state !== 'packed')) { m.blockT = (m.blockT || 0) + dt; if (m.blockT > 2) { const o = MAP.nearestOpen(nav, G.map, m.x, m.y); m.x = o.x; m.y = o.y; m.blockT = 0; sq.slots = null; } } else m.blockT = 0;
@@ -784,6 +787,37 @@ const SIM = (() => {
       out[k] = { x, y, cover: MAP.coverAt(G.map, x, y, x + fx * 10, y + fy * 10) };
     }
     return out;
+  }
+  /* Working (building, repairing): the men gather on the side of the job nearest the squad, a step out from it, side
+     by side and facing it. Without this a working squad fell back to its fire line and cover spots up to 5 m off, its
+     anchor drifted after the men, and once past the work range it walked back in: the squad kept wandering off. */
+  function setWork(sq, w) {
+    const key = w.kind + ':' + Math.round(w.x * 2) + ':' + Math.round(w.y * 2);   // a vehicle that moves half a metre gets new spots
+    if (sq.workKey === key) return;
+    sq.work = w; sq.workKey = key; sq.slots = null;
+  }
+  function workSlots(G, sq) {
+    const w = sq.work, nav = MAP.navGrids(G.map).inf, alive = sq.models.filter(m => m.alive), n = alive.length, GAP = 1.3, OUT = 1.2;
+    let pts = [];
+    if (w.kind === 'ring') {
+      const R = w.r + OUT, a0 = Math.atan2(sq.y - w.y, sq.x - w.x), da = GAP / R;
+      for (let i = 0; i < n; i++) { const a = a0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * da; pts.push({ x: w.x + Math.cos(a) * R, y: w.y + Math.sin(a) * R }); }
+    } else if (w.kind === 'box') {
+      // walk the outline (a step outside it) from the point nearest the squad, alternating either way
+      const hw = w.hw + OUT, hd = w.hd + OUT, P = 4 * (hw + hd);
+      const at = t => { t = ((t % P) + P) % P; if (t < 2 * hw) return { x: w.x - hw + t, y: w.y - hd }; t -= 2 * hw; if (t < 2 * hd) return { x: w.x + hw, y: w.y - hd + t }; t -= 2 * hd; if (t < 2 * hw) return { x: w.x + hw - t, y: w.y + hd }; t -= 2 * hw; return { x: w.x - hw, y: w.y + hd - t }; };
+      let best = 0, bd = 1e9; for (let t = 0; t < P; t += .5) { const q = at(t), d = U.dist2(q.x, q.y, sq.x, sq.y); if (d < bd) { bd = d; best = t; } }
+      for (let i = 0; i < n; i++) pts.push(at(best + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * GAP));
+    } else {
+      // a wall or sandbag line: along it on the squad's side
+      const L = Math.hypot(w.bx - w.ax, w.by - w.ay) || 1, ux = (w.bx - w.ax) / L, uy = (w.by - w.ay) / L;
+      let nx = -uy, ny = ux; if ((sq.x - w.x) * nx + (sq.y - w.y) * ny < 0) { nx = -nx; ny = -ny; }
+      for (let i = 0; i < n; i++) { const off = U.clamp((i % 2 ? 1 : -1) * Math.ceil(i / 2) * GAP, -L / 2, L / 2); pts.push({ x: w.x + ux * off + nx * OUT, y: w.y + uy * off + ny * OUT }); }
+    }
+    return pts.map(p => {
+      if (!MAP.walkable(nav, G.map, p.x, p.y)) { const o = MAP.nearestOpen(nav, G.map, p.x, p.y); p = { x: o.x, y: o.y }; }
+      return { x: p.x, y: p.y, cover: 'none', a: Math.atan2(w.y - p.y, w.x - p.x) };
+    });
   }
   function holdSlots(G, sq) {
     // face: the way the player dragged, else the nearest enemy in sight, else the way the squad was walking
