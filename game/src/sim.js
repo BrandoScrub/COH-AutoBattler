@@ -165,6 +165,8 @@ const SIM = (() => {
   /* ---------------- orders ---------------- */
   function issue(G, ids, o, queue) {
     const all = ids.map(id => G.byId.get(id)).filter(e => e && !e.dead);
+    // a standing order (see ai.js) is not a move: it sticks whatever the unit is doing, and the unit acts on it when it can
+    if (o.type === 'role') { for (const e of all) if (e.type !== 'building') { e.role = o.role; e.reRole = true; } return; }
     // a retreat cannot be called off (as in CoH3): retreating squads ignore every order until they reach base
     const ents = all.filter(e => !e.retreating || o.type === 'retreat');
     if (!ents.length && all.length) { const r = all[0]; event(G, r.owner, 'error', 'Retreating: orders resume once the squad reaches base', r.x, r.y); return; }
@@ -305,7 +307,7 @@ const SIM = (() => {
     const P = G.players[b.owner];
     if (o.type === 'produce') {
       if (prodBlock(G, b, o.unit)) return;
-      const u = unitDef(o.unit); pay(P, u.cost); b.queue.push({ unit: o.unit, t: 0, total: u.time }); popRecount(G);
+      const u = unitDef(o.unit); pay(P, u.cost); b.queue.push({ unit: o.unit, t: 0, total: u.time, role: o.role }); popRecount(G);
     } else if (o.type === 'cancel') {
       const q = b.queue[o.index]; if (!q) return; pay(P, unitDef(q.unit).cost, -1); b.queue.splice(o.index, 1); popRecount(G);
     } else if (o.type === 'rally' || o.type === 'move') { b.rally = { x: o.x, y: o.y }; }
@@ -323,6 +325,7 @@ const SIM = (() => {
         const isV = !D.SQUADS[q.unit], nav = MAP.navGrids(G.map);
         const p = MAP.nearestOpen(isV ? nav.veh : nav.inf, G.map, sx, sy, MAP.mainRegion(G.map, isV));   // ground a vehicle can use, joined to the battlefield
         const e = isV ? spawnVehicle(G, q.unit, b.owner, p.x, p.y, ang) : spawnSquad(G, q.unit, b.owner, p.x, p.y);
+        if (q.role) e.role = q.role;
         orderEnt(G, e, { type: 'move', x: b.rally.x + G.rng.range(-3, 3), y: b.rally.y + G.rng.range(-3, 3) });
         event(G, b.owner, 'ready', e.def.name + ' ready', e.x, e.y);
         popRecount(G);
@@ -865,7 +868,7 @@ const SIM = (() => {
       else { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); }
     }
     // a vehicle found inside an obstacle (a building raised round it, a wreck) is moved to open ground at once
-    { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
+    { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y, MAP.mainRegion(G.map, true)); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
     let target = null;
     if (v.path && v.path.length && (v.owner < 0 || (v.crit && v.crit.engine === 2))) { v.path = null; if (v.order.type !== 'attack') v.order = { type: 'idle' }; }
     if (v.path && v.path.length && !(v.order.type === 'attackMove' && v.engageT > G.t)) target = v.path[0];
@@ -912,7 +915,8 @@ const SIM = (() => {
         const st = v.speed * dt * dir; let moved = false;
         for (const a of [.6, -.6, 1.2, -1.2]) { const sx = v.x + Math.cos(v.heading + a) * st, sy = v.y + Math.sin(v.heading + a) * st; if (MAP.walkable(grid, G.map, sx, sy)) { v.x = sx; v.y = sy; v.dist += Math.abs(st); moved = true; break; } }
         if (!moved) { v.speed *= .5; v.stuckT += dt; }
-        if (v.stuckT > 1.2 && v.path && v.path.length) { const end = v.path[v.path.length - 1]; const o = MAP.nearestOpen(grid, G.map, v.x + Math.cos(v.heading + Math.PI) * 1.5, v.y + Math.sin(v.heading + Math.PI) * 1.5); if (v.stuckT > 3) { v.x = o.x; v.y = o.y; } setPath(G, v, end.x, end.y); if (v.stuckT > 3) v.stuckT = 0; }
+        // backing out goes to open ground joined to the battlefield: a lone open cell between sandbags and a house trapped vehicles
+        if (v.stuckT > 1.2 && v.path && v.path.length) { const end = v.path[v.path.length - 1]; const o = MAP.nearestOpen(grid, G.map, v.x + Math.cos(v.heading + Math.PI) * 1.5, v.y + Math.sin(v.heading + Math.PI) * 1.5, MAP.mainRegion(G.map, true)); if (v.stuckT > 3) { v.x = o.x; v.y = o.y; } setPath(G, v, end.x, end.y); if (v.stuckT > 3) v.stuckT = 0; }
       }
       crush(G, v);
     }
