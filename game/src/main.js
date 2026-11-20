@@ -5,7 +5,7 @@
 const MAIN = (() => {
   const ART = (window.ART_BASE || '../art/');
   let G = null, BG = null, lib = {}, layout = null, assets = null, inMenu = true, last = 0, acc = 0, hudT = 0, mmT = 0, fogT = -1, speed = 1, side = 'us';
-  let screen = 'boot', back = 'main', ready = false;
+  let screen = 'boot', back = 'main', ready = false, mode = 'skirmish';
   const $ = s => document.querySelector(s);
   const CINE = { selected: new Set(), hover: null, noFog: true, cinematic: true };
 
@@ -59,26 +59,34 @@ const MAIN = (() => {
   }
 
   /* ---------------- a match ---------------- */
-  function start(s) {
+  /* mode: 'skirmish' (1v1 against the AI), 'sandbox' (the same with 10,000 of everything, for testing)
+     or 'spectate' (AI against AI, no fog, no orders) */
+  function start(s, m) {
     if (!ready) return;
-    side = s || side;
-    show('deploy'); $('#deploy p').textContent = side === 'us' ? 'US Forces · Farm valley, Italy 1944' : 'Wehrmacht · Farm valley, Italy 1944';
+    side = s || side; mode = m || mode;
+    const spec = mode === 'spectate';
+    show('deploy'); $('#deploy p').textContent = spec ? 'AI against AI · Farm valley, Italy 1944' : (side === 'us' ? 'US Forces' : 'Wehrmacht') + (mode === 'sandbox' ? ' · Sandbox' : '') + ' · Farm valley, Italy 1944';
+    speed = +set.speed || 1;
     setTimeout(() => {   // one frame for the overlay to show
-      G = SIM.create({ seed: 7, playerSide: side, crewLayout: layout });
+      G = SIM.create({ seed: 7, playerSide: side, crewLayout: layout, mode });
+      document.body.classList.toggle('spectate', spec);
       window.G = G; acc = 0; fogT = -1;
       const canvas = $('#view');
       RENDER.init(canvas, lib, G);
       HUD.init(G, canvas);
-      HUD.ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
-      HUD.ui.paused = false;
+      HUD.ui.selected = spec ? new Set() : new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
+      HUD.ui.paused = false; HUD.ui.noFog = spec; HUD.ui.mode = null;
       resize();
       applyLayout.zoomed = false; applyLayout();
       show('game');
-      HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
+      if (spec) { RENDER.cam.x = G.map.w / 2; RENDER.cam.y = G.map.h / 2; HUD.flash('Watching the AI: no fog, no orders. Pick a speed under the score; Space pauses.'); }
+      else if (mode === 'sandbox') HUD.flash('Sandbox: 10,000 manpower, munitions and fuel to test with.');
+      else HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
     }, 30);
   }
   function toMain() {
-    G = null; window.G = null; HUD.ui.paused = false;
+    G = null; window.G = null; HUD.ui.paused = false; HUD.ui.noFog = false; speed = +set.speed || 1;
+    document.body.classList.remove('spectate');
     RENDER.init($('#view'), lib, BG);
     RENDER.cam.k = .62; RENDER.cam.x = 70; RENDER.cam.y = 150;
     show('main');
@@ -115,7 +123,7 @@ const MAIN = (() => {
     if (!inMenu && !HUD.ui.paused && !G.over) {
       acc += dt * speed;
       let n = 0;
-      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); SIM.step(G, SIM.DT); acc -= SIM.DT; }
+      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); if (G.spectate) AI.step(G, 0); SIM.step(G, SIM.DT); acc -= SIM.DT; }
       if (n > 8) acc = 0;
     }
     HUD.tick(dt);
@@ -167,25 +175,28 @@ const MAIN = (() => {
     saved.length = 0;
   }
   function showEnd() {
-    const won = G.over.winner === 0, e = $('#end');
-    e.querySelector('h2').textContent = won ? 'Victory' : 'Defeat';
+    const won = G.over.winner === 0, e = $('#end'), W = G.players[G.over.winner];
+    e.querySelector('h2').textContent = G.spectate ? (W ? W.F.name + ' win' : 'Draw') : won ? 'Victory' : 'Defeat';
     e.querySelector('p').textContent = G.over.reason + ' at ' + U.fmtTime(G.t) + '.';
     show('end');
   }
 
   document.addEventListener('DOMContentLoaded', () => {
     const on = (id, f) => $(id).addEventListener('click', f);
-    on('#mm-skirmish', () => show('skirmish'));
+    const skirmish = m => { mode = m; $('#sk-mode').textContent = m === 'sandbox' ? 'Sandbox: you start with 10,000 manpower, munitions and fuel. The AI plays normally.' : ''; $('#sk-mode').style.display = m === 'sandbox' ? '' : 'none'; $('#skirmish h2').textContent = m === 'sandbox' ? 'Sandbox' : 'Skirmish'; show('skirmish'); };
+    on('#mm-skirmish', () => skirmish('skirmish'));
+    on('#mm-sandbox', () => skirmish('sandbox'));
+    on('#mm-watch', () => start('us', 'spectate'));
     on('#mm-howto', () => show('howto'));
     on('#mm-settings', () => { back = 'main'; show('settings'); });
-    on('#start', () => start('us'));
-    on('#start2', () => start('de'));
+    on('#start', () => start('us', mode));
+    on('#start2', () => start('de', mode));
     document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => show(b.dataset.back === 'auto' ? back : b.dataset.back)));
     on('#resume', () => menu(false));
     on('#p-settings', () => { back = 'pausemenu'; show('settings'); });
     on('#quit', () => toMain());
     on('#again', () => toMain());
-    on('#rematch', () => start(side));
+    on('#rematch', () => start(side, mode));
     // settings
     const bindSel = (id, key, cast) => { const el = $(id); el.value = String(set[key]); el.addEventListener('change', () => { set[key] = cast ? cast(el.value) : el.value; save(); applySettings(); }); };
     bindSel('#ctl', 'ctl'); bindSel('#quality', 'quality'); bindSel('#speed', 'speed', Number);
@@ -196,5 +207,5 @@ const MAIN = (() => {
     last = performance.now(); requestAnimationFrame(loop);
     boot();
   });
-  return { menu, inMenu: () => inMenu, start, screen: () => screen };
+  return { menu, inMenu: () => inMenu, start, screen: () => screen, speed: () => speed, setSpeed: x => { speed = x; } };
 })();

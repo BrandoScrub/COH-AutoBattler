@@ -64,6 +64,8 @@ const HUD = (() => {
   }
 
   /* ---------------- build the DOM ---------------- */
+  /* every order the player gives goes through here; watching an AI match, nothing is ordered */
+  function issue(...a) { if (G.spectate) return; return SIM.issue(...a); }
   function init(game, canvas) {
     G = game; canvasEl = canvas;
     const root = $('#hud'); root.innerHTML = '';
@@ -82,6 +84,13 @@ const HUD = (() => {
     el.tip = h('div', 'tip');
     el.banner = h('div', 'banner');
     root.append(el.ticker, el.alerts, el.roster, el.mm, el.bg, el.bottom, el.tip, el.banner);
+    el.spec = null;
+    if (G.spectate) {
+      // watching the AI: both armies' purses and a speed switch under the score ticker
+      el.spec = h('div', 'specbar', `<div class="sp0"></div><div class="spd">${[1, 2, 4, 8].map(x => `<button data-x="${x}">${x}x</button>`).join('')}</div><div class="sp1"></div>`);
+      el.spec.addEventListener('click', ev => { const b = ev.target.closest('[data-x]'); if (b) MAIN.setSpeed(+b.dataset.x); });
+      root.append(el.spec);
+    }
     el.mmc = el.mm.querySelector('canvas');
     el.card = el.bottom.querySelector('.card');
     for (let i = 0; i < 12; i++) {
@@ -98,7 +107,7 @@ const HUD = (() => {
     el.roster.addEventListener('click', ev => { const t = ev.target.closest('[data-id]'); if (!t) return; const id = +t.dataset.id; if (ev.shiftKey) ui.selected.add(id); else { ui.selected = new Set([id]); } ui.page = 'main'; if (ev.detail === 2) centreOn(G.byId.get(id)); });
     el.alerts.addEventListener('click', ev => { const t = ev.target.closest('[data-x]'); if (t) { RENDER.cam.x = +t.dataset.x; RENDER.cam.y = +t.dataset.y; } });
     el.bottom.querySelector('.slotcol').addEventListener('click', ev => { const t = ev.target.closest('[data-act]'); if (t) slotColAct(t.dataset.act); });
-    el.bottom.querySelector('.panel').addEventListener('click', ev => { const t = ev.target.closest('[data-q]'); if (t) { const b = primary(); if (b && b.type === 'building') SIM.issue(G, [b.id], { type: 'cancel', index: +t.dataset.q }); } });
+    el.bottom.querySelector('.panel').addEventListener('click', ev => { const t = ev.target.closest('[data-q]'); if (t) { const b = primary(); if (b && b.type === 'building') issue(G, [b.id], { type: 'cancel', index: +t.dataset.q }); } });
     bindInput(); bindTouch();
   }
   function glyphIcon(gl) { return icon('g:' + gl, g => { g.scale(1.5, 1.5); (RENDER.GLYPHS[gl])(g); }, 36, 36); }
@@ -114,7 +123,7 @@ const HUD = (() => {
 
   /* ---------------- command card ---------------- */
   function cardFor() {
-    const sel = selEnts().filter(e => e.owner === 0), out = new Array(12).fill(null);
+    const sel = G.spectate ? [] : selEnts().filter(e => e.owner === 0), out = new Array(12).fill(null);
     if (!sel.length) return out;
     const e = sel[0], P = G.players[0];
     if (e.type === 'building') {
@@ -122,7 +131,7 @@ const HUD = (() => {
       const keys = [0, 1, 2, 3, 4, 5];
       e.def.produce.forEach((u, i) => {
         const def = SIM.unitDef(u), why = SIM.prodBlock(G, e, u);
-        out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => SIM.issue(G, [e.id], { type: 'produce', unit: u }) };
+        out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };
       });
       out[7] = { img: ico('rally'), label: 'Set rally point', tip: '<b>Set rally point</b><div>New units walk here after they are produced.</div>', act: () => { ui.mode = { type: 'rally', id: e.id }; } };
       // Wehrmacht: the HQ card holds one place-building button per tier (reference board 08, item 6)
@@ -146,10 +155,10 @@ const HUD = (() => {
     }
     // orders row
     out[0] = { img: ico('attackMove'), label: 'Attack move', tip: '<b>Attack move</b><div>Move, engaging enemies on the way.</div>', act: () => { ui.mode = { type: 'attackMove' }; } };
-    out[1] = { img: ico('stop'), label: 'Stop', tip: '<b>Stop</b>', act: () => SIM.issue(G, sel.map(s => s.id), { type: 'stop' }) };
+    out[1] = { img: ico('stop'), label: 'Stop', tip: '<b>Stop</b>', act: () => issue(G, sel.map(s => s.id), { type: 'stop' }) };
     if (e.type === 'vehicle') out[2] = { img: ico('reverse'), label: 'Reverse', tip: '<b>Reverse</b><div>Back away keeping the front armour on the enemy.</div>', act: () => { ui.mode = { type: 'reverse' }; } };
-    out[3] = { img: ico('retreat'), label: 'Retreat', tip: '<b>Retreat</b><div>Fall back to the headquarters. Retreating squads take less fire and recover from suppression.</div>', act: () => SIM.issue(G, sel.map(s => s.id), { type: 'retreat' }) };
-    if (e.type === 'squad' && e.garrison != null) out[2] = { img: ico('unload'), label: 'Exit building', tip: '<b>Exit building</b><div>Leave the house. Any move order also brings the squad out.</div>', act: () => SIM.issue(G, sel.filter(s => s.garrison != null).map(s => s.id), { type: 'unload' }) };
+    out[3] = { img: ico('retreat'), label: 'Retreat', tip: '<b>Retreat</b><div>Fall back to the headquarters. Retreating squads take less fire and recover from suppression.</div>', act: () => issue(G, sel.map(s => s.id), { type: 'retreat' }) };
+    if (e.type === 'squad' && e.garrison != null) out[2] = { img: ico('unload'), label: 'Exit building', tip: '<b>Exit building</b><div>Leave the house. Any move order also brings the squad out.</div>', act: () => issue(G, sel.filter(s => s.garrison != null).map(s => s.id), { type: 'unload' }) };
     if (e.type === 'squad') {
       let a = 4;
       for (const ab of e.def.abilities || []) {
@@ -160,7 +169,7 @@ const HUD = (() => {
       let u = 8;
       for (const up of e.def.upgrades || []) {
         const done = e.upgrades.has(up.id), busy = e.upgrading, why = done ? 'Fitted' : busy ? 'Upgrading' : !SIM.canAfford(P, up.cost) ? 'Not enough munitions' : !SIM.nearReinforcePoint(G, e) ? 'Must be near a base building' : null;
-        out[u++] = { img: ico(up.swap && up.swap.sprite === 'flamethrower' ? 'flame' : 'lmg'), label: up.name, tip: `<b>${up.name}</b><div>${costStr(up.cost)} &middot; ${up.time}s</div>`, cost: up.cost, disabled: !!why, why, done, act: () => SIM.issue(G, [e.id], { type: 'upgrade', id: up.id }) };
+        out[u++] = { img: ico(up.swap && up.swap.sprite === 'flamethrower' ? 'flame' : 'lmg'), label: up.name, tip: `<b>${up.name}</b><div>${costStr(up.cost)} &middot; ${up.time}s</div>`, cost: up.cost, disabled: !!why, why, done, act: () => issue(G, [e.id], { type: 'upgrade', id: up.id }) };
       }
       if (e.def.builder) {
         out[10] = { img: ico('repair'), label: 'Repair', tip: '<b>Repair</b><div>Right-click a damaged vehicle or building of yours.</div>', act: () => { ui.mode = { type: 'repair', ids: sel.filter(s => s.def.builder).map(s => s.id) }; } };
@@ -195,6 +204,11 @@ const HUD = (() => {
     el.ticker.querySelector('.vp0 s').style.width = (P.vp / vpS * 100) + '%'; el.ticker.querySelector('.vp1 s').style.width = (E.vp / vpS * 100) + '%';
     put(el.ticker.querySelector('.stars'), G.map.points.filter(p => p.type === 'victory').map(p => `<span class="star o${p.owner}">&#9733;</span>`).join(''));
     el.ticker.querySelector('.clock').textContent = U.fmtTime(G.t);
+    if (el.spec) {
+      const line = Q => `<b style="color:${Q.F.colour}">${Q.F.name}</b> ${fmt(Q.res.mp)} mp &middot; ${fmt(Q.res.mu)} mu &middot; ${fmt(Q.res.fu)} fu &middot; pop ${Q.pop}/${Q.popCap}`;
+      put(el.spec.querySelector('.sp0'), line(P)); put(el.spec.querySelector('.sp1'), line(E));
+      el.spec.querySelectorAll('[data-x]').forEach(b => b.classList.toggle('on', +b.dataset.x === MAIN.speed()));
+    }
     // resources
     const rs = el.bottom.querySelectorAll('.res');
     [['mp', 'mp'], ['mu', 'mu'], ['fu', 'fu']].forEach(([k], i) => { rs[i].querySelector('b').textContent = fmt(P.res[k]); const inc = P.income[k]; rs[i].querySelector('small').textContent = inc > .05 ? '+' + Math.round(inc) : ''; });
@@ -329,7 +343,7 @@ const HUD = (() => {
     for (const p of m.points) { const [a, b] = mmToScreen(p.x, p.y); RENDER.pointIcon(g, p, a, b, .55, null); }
     // units
     for (const e of G.ents) {
-      if (e.dead || (e.owner !== 0 && !FOG.visible(G, 0, e))) continue;
+      if (e.dead || (e.owner !== 0 && !ui.noFog && !FOG.visible(G, 0, e))) continue;
       const [a, b] = mmToScreen(e.x, e.y);
       g.fillStyle = e.owner === 0 ? (ui.selected.has(e.id) ? '#fff' : '#5ab4ff') : '#ff5a4a';
       if (e.type === 'building') g.fillRect(a - 3.5, b - 3.5, 7, 7); else if (e.type === 'vehicle') g.fillRect(a - 2.5, b - 2.5, 5, 5); else { g.beginPath(); g.arc(a, b, 2.2, 0, 7); g.fill(); }
@@ -370,8 +384,8 @@ const HUD = (() => {
     let best = null, bd = ui.touch ? 46 * 46 : 30 * 30;
     for (const e of G.ents) {
       if (e.dead) continue;
-      if (e.owner !== 0 && e.type !== 'building' && !FOG.visible(G, 0, e)) continue;
-      if (e.type === 'building' && e.owner !== 0 && !FOG.explored(G, 0, e.x, e.y)) continue;
+      if (e.owner !== 0 && e.type !== 'building' && !ui.noFog && !FOG.visible(G, 0, e)) continue;
+      if (e.type === 'building' && e.owner !== 0 && !ui.noFog && !FOG.explored(G, 0, e.x, e.y)) continue;
       if (e.type === 'squad') { for (const m of e.models) { if (!m.alive) continue; const [x, y] = RENDER.toScreen(m.x, m.y, .8); const d = (x - sx) ** 2 + (y - sy) ** 2; if (d < bd * .5) { bd = d * 2; best = e; } } if (e.crew && e.crew.state !== 'packed') { const [x, y] = RENDER.toScreen(e.crew.x, e.crew.y, .5); const d = (x - sx) ** 2 + (y - sy) ** 2; if (d < bd) { bd = d; best = e; } } }
       else if (e.type === 'vehicle') { const [x, y] = RENDER.toScreen(e.x, e.y, 1); const d = (x - sx) ** 2 + (y - sy) ** 2, r = e.def.length * 12 * RENDER.cam.k; if (d < Math.max(bd, r * r)) { bd = d; best = e; } }
       else { const [wx, wy] = RENDER.toWorld(sx, sy); if (Math.abs(wx - e.x) < e.w / 2 + 1 && Math.abs(wy - e.y) < e.d / 2 + 1) { best = e; bd = 0; } }
@@ -415,7 +429,7 @@ const HUD = (() => {
     el.mmc.addEventListener('mousedown', e => {
       const [wx, wy] = mmEventWorld(e);
       if (e.button === 0) { RENDER.cam.x = wx; RENDER.cam.y = wy; mouse.mmDrag = true; }
-      if (e.button === 2) { const ids = selEnts().filter(s => s.owner === 0).map(s => s.id); if (ids.length) SIM.issue(G, ids, { type: 'move', x: wx, y: wy }, e.shiftKey); }
+      if (e.button === 2) { const ids = selEnts().filter(s => s.owner === 0).map(s => s.id); if (ids.length) issue(G, ids, { type: 'move', x: wx, y: wy }, e.shiftKey); }
     });
     el.mmc.addEventListener('mousemove', e => { if (mouse.mmDrag && e.buttons & 1) { const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; } });
   }
@@ -458,19 +472,19 @@ const HUD = (() => {
     const m = ui.mode, [wx, wy] = RENDER.toWorld(e.clientX, e.clientY);
     if (m) {
       const ids = m.ids || selEnts().filter(s => s.owner === 0).map(s => s.id);
-      if (m.type === 'attackMove' || m.type === 'reverse') { SIM.issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); marker(wx, wy, m.type === 'attackMove' ? '#ff6a5a' : '#ffd36a'); pinnedNote(ids); if (!e.shiftKey) ui.mode = null; return; }
-      if (m.type === 'ability') { const ent = G.byId.get(ids[0]), hb = m.id === 'breach' ? houseAtScreen(e.clientX, e.clientY) : null; if (ent) SIM.issue(G, [ent.id], { type: 'ability', id: m.id, x: hb ? hb.x : wx, y: hb ? hb.y : wy }); ui.mode = null; return; }
-      if (m.type === 'rally') { SIM.issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
+      if (m.type === 'attackMove' || m.type === 'reverse') { issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); marker(wx, wy, m.type === 'attackMove' ? '#ff6a5a' : '#ffd36a'); pinnedNote(ids); if (!e.shiftKey) ui.mode = null; return; }
+      if (m.type === 'ability') { const ent = G.byId.get(ids[0]), hb = m.id === 'breach' ? houseAtScreen(e.clientX, e.clientY) : null; if (ent) issue(G, [ent.id], { type: 'ability', id: m.id, x: hb ? hb.x : wx, y: hb ? hb.y : wy }); ui.mode = null; return; }
+      if (m.type === 'rally') { issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
       if (m.type === 'place') {
         const err = SIM.canPlace(G, 0, m.what, wx, wy) || SIM.buildReqMissing(G, 0, m.what) || (!SIM.canAfford(G.players[0], DATA.BUILDINGS[m.what].cost) ? 'Not enough resources' : null);
         if (err) { flash(err); return; }
         const builders = m.ids.filter(id => { const b = G.byId.get(id); return b && !b.dead; });
         if (!builders.length) { flash('No engineers left to build it'); ui.mode = null; return; }
-        SIM.issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + ' placed'); return;
+        issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + ' placed'); return;
       }
-      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; SIM.issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
-      if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) SIM.issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
-      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') SIM.issue(G, m.ids, { type: 'repair', target: t.id }); ui.mode = null; return; }
+      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
+      if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
+      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }); ui.mode = null; return; }
     }
     // box or click select
     const d = mouse.drag;
@@ -495,42 +509,42 @@ const HUD = (() => {
     if (ui.mode) { ui.mode = null; ui.ghost = null; return; }
     const sel = selEnts().filter(s => s.owner === 0); if (!sel.length) return;
     const [wx, wy] = RENDER.toWorld(e.clientX, e.clientY), r = mouse.rdown, dragged = r && Math.hypot(e.clientX - r.x, e.clientY - r.y) > 12;
-    if (sel[0].type === 'building') { SIM.issue(G, sel.map(s => s.id), { type: 'rally', x: wx, y: wy }); return; }
+    if (sel[0].type === 'building') { issue(G, sel.map(s => s.id), { type: 'rally', x: wx, y: wy }); return; }
     const units = sel.filter(s => s.type !== 'building').map(s => s.id);
     const t = !dragged && entAt(e.clientX, e.clientY);
     // an abandoned vehicle: the nearest infantry squad climbs in; anything else fires on it
     if (t && t.owner < 0 && t.type === 'vehicle') {
       const inf = sel.filter(s => SIM.canPickUp(s) && s.models.filter(m => m.alive).length >= 2).sort((a, b) => U.dist2(a.x, a.y, t.x, t.y) - U.dist2(b.x, b.y, t.x, t.y));
-      if (inf.length) { SIM.issue(G, [inf[0].id], { type: 'recrew', target: t.id }); marker(t.x, t.y, '#ffe27a'); return; }
-      SIM.issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return;
+      if (inf.length) { issue(G, [inf[0].id], { type: 'recrew', target: t.id }); marker(t.x, t.y, '#ffe27a'); return; }
+      issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return;
     }
-    if (t && t.owner === 1) { SIM.issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return; }
+    if (t && t.owner === 1) { issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return; }
     if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
       const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
-      if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } else SIM.issue(G, builders, { type: 'repair', target: t.id }); return; }
+      if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } else issue(G, builders, { type: 'repair', target: t.id }); return; }
     }
     // right-click an abandoned gun or a dropped weapon: the nearest squad that can use it goes for it
     const dd = !dragged && !t ? dropAt(e.clientX, e.clientY) : null;
     if (dd) {
       const can = sel.filter(s => SIM.canPickUp(s)).sort((a, b) => U.dist2(a.x, a.y, dd.x, dd.y) - U.dist2(b.x, b.y, dd.x, dd.y));
-      if (can.length) { SIM.issue(G, [can[0].id], { type: 'pickup', drop: dd.id }); marker(dd.x, dd.y, '#ffe27a'); return; }
+      if (can.length) { issue(G, [can[0].id], { type: 'pickup', drop: dd.id }); marker(dd.x, dd.y, '#ffe27a'); return; }
     }
     // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
     const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
     if (hh && (hh.occ == null || (G.byId.get(hh.occ) || {}).owner === 0)) {
       const inf = sel.filter(s => s.type === 'squad' && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
       if (inf.length) {
-        if (hh.occ == null || hh.occ === inf[0].id) SIM.issue(G, [inf[0].id], { type: 'garrison', house: hh.id }); else flash('That building is already occupied');
-        const rest = units.filter(id => id !== inf[0].id); if (rest.length) SIM.issue(G, rest, { type: 'move', x: hh.x + (hh.x < 100 ? 6 : -6), y: hh.y });
+        if (hh.occ == null || hh.occ === inf[0].id) issue(G, [inf[0].id], { type: 'garrison', house: hh.id }); else flash('That building is already occupied');
+        const rest = units.filter(id => id !== inf[0].id); if (rest.length) issue(G, rest, { type: 'move', x: hh.x + (hh.x < 100 ? 6 : -6), y: hh.y });
         marker(hh.x, hh.y, '#7fe0ff'); return;
       }
     }
     if (dragged) {
       // right-drag: move there and face the drag direction (team weapons set up that way)
       const [sx, sy] = RENDER.toWorld(r.x, r.y), face = Math.atan2(wy - sy, wx - sx);
-      SIM.issue(G, units, { type: 'move', x: sx, y: sy, face }, e.shiftKey); marker(sx, sy, '#7fe0ff'); pinnedNote(units); return;
+      issue(G, units, { type: 'move', x: sx, y: sy, face }, e.shiftKey); marker(sx, sy, '#7fe0ff'); pinnedNote(units); return;
     }
-    SIM.issue(G, units, { type: 'move', x: wx, y: wy }, e.shiftKey); marker(wx, wy, e.shiftKey ? '#b8f0ff' : '#7fe0ff'); pinnedNote(units);
+    issue(G, units, { type: 'move', x: wx, y: wy }, e.shiftKey); marker(wx, wy, e.shiftKey ? '#b8f0ff' : '#7fe0ff'); pinnedNote(units);
   }
   function marker(x, y, col) { G.fx.push({ kind: 'order', x, y, t: G.t, life: .8, col }); }
   /* pinned squads only take a retreat order: say so instead of silently ignoring the click */
@@ -555,7 +569,7 @@ const HUD = (() => {
   }
   function longPressAt(x, y) {
     const ids = selEnts().filter(s => s.owner === 0 && s.type !== 'building').map(s => s.id); if (!ids.length) return;
-    const [wx, wy] = RENDER.toWorld(x, y); SIM.issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move'); pinnedNote(ids);
+    const [wx, wy] = RENDER.toWorld(x, y); issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move'); pinnedNote(ids);
   }
   function bindTouch() {
     bindTouchHud();
