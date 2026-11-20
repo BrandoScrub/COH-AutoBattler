@@ -53,7 +53,7 @@
   .north { position: absolute; top: -2px; left: 50%; transform: translateX(-50%); background: #111; border: 1px solid #555; font: 700 11px/16px Inter; padding: 0 5px; }
   .mmbtns { display: flex; align-items: center; gap: 4px; margin-top: 4px; padding: 4px 6px; background: linear-gradient(#2a2c2a, #1a1b1a); border: 1px solid #000; box-shadow: inset 0 0 0 1px var(--edge); border-radius: 20px; }
   .mmbtns button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid #000; background: radial-gradient(#3a3b37, #222320); box-shadow: inset 0 0 0 1px #555; cursor: pointer; display: grid; place-items: center; font-size: 13px; }
-  .mmbtns button:hover { box-shadow: inset 0 0 0 1px var(--gold); } .mmbtns button img { width: 22px; height: 22px; }
+  .mmbtns button:hover { box-shadow: inset 0 0 0 1px var(--gold); } .mmbtns button.on { box-shadow: inset 0 0 0 2px var(--gold); color: var(--gold); } .mmbtns button img { width: 22px; height: 22px; }
   .mmbtns .logo { flex: 1; text-align: center; font: 800 9px/10px Inter; color: #6f6b60; letter-spacing: 1px; }
 
   /* right edge: battlegroup strip and command-point dial (boards 05 and 06) */
@@ -226,6 +226,7 @@
       <b>A S D F &middot; Z X C V</b><span>abilities, set-up facing, upgrades, construction; on buildings the units they produce</span>
       <b>Ctrl + 1-9, 1-9</b><span>assign and recall control groups; press twice to jump there; Shift + 1-9 adds a group to the selection; Ctrl + A selects your whole army</span>
       <b>Space</b><span>tactical pause (orders still work)</span>
+      <b>H</b><span>height view: the ground coloured by elevation (also the &#9650; button by the minimap)</span>
       <b>Arrows, screen edge, middle drag, wheel</b><span>camera; Home jumps to your HQ</span></span>
     </div>
     <button class="bigbtn ghost" data-back="main">Back</button>

@@ -73,7 +73,7 @@ const HUD = (() => {
     el.alerts = h('div', 'alerts');
     el.roster = h('div', 'roster', '<div class="r-units"></div><div class="r-structs"></div>');
     el.mm = h('div', 'mmwrap', `<div class="mmframe"><canvas width="236" height="236"></canvas><div class="north">N</div></div>
-      <div class="mmbtns"><button data-a="menu" title="Menu (F10)">&#9776;</button><button data-a="selv" title="Select all vehicles">${'<img src="' + glyphIcon('tank') + '">'}</button><button data-a="seli" title="Select all infantry">${'<img src="' + glyphIcon('infantry') + '">'}</button><span class="logo">TACTICAL<br>WW2</span><button data-a="pause" title="Tactical pause (Space)">&#10074;&#10074;</button></div>`);
+      <div class="mmbtns"><button data-a="menu" title="Menu (F10)">&#9776;</button><button data-a="selv" title="Select all vehicles">${'<img src="' + glyphIcon('tank') + '">'}</button><button data-a="seli" title="Select all infantry">${'<img src="' + glyphIcon('infantry') + '">'}</button><button data-a="height" title="Height view (H)">&#9650;</button><span class="logo">TACTICAL<br>WW2</span><button data-a="pause" title="Tactical pause (Space)">&#10074;&#10074;</button></div>`);
     el.bg = h('div', 'bgstrip', `<div class="bgtile" title="Battlegroups: the structure is in place (choose one of three, two branches, pick-one pairs). Content arrives when the battlegroups are designed."><span>BATTLE<br>GROUP</span></div><div class="dial" title="Command points: earned from veterancy experience; spend them on battlegroup abilities once battlegroups exist."><b>0</b><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" /></svg></div>`);
     el.bottom = h('div', 'bottom', `
       <div class="resrow"><div class="res mp"><i></i><b></b><small></small></div><div class="res mu"><i></i><b></b><small></small></div><div class="res fu"><i></i><b></b><small></small></div><div class="res pop"><i></i><b></b><small></small></div></div>
@@ -356,10 +356,12 @@ const HUD = (() => {
   }
   /* event position on the minimap in canvas pixels, whatever size the HUD is drawn at */
   function mmEventWorld(e) { const r = el.mmc.getBoundingClientRect(); return mmToWorld((e.clientX - r.left) * el.mmc.width / r.width, (e.clientY - r.top) * el.mmc.height / r.height); }
+  function toggleHeight() { ui.heightView = !ui.heightView; flash(ui.heightView ? 'Height view: green low, red high, a line every metre (H to hide)' : 'Height view off'); const b = el.mm.querySelector('[data-a=height]'); if (b) b.classList.toggle('on', ui.heightView); }
   function mmButton(a) {
     if (a === 'selv') ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'vehicle' && !e.dead).map(e => e.id));
     else if (a === 'seli') ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad' && !e.dead).map(e => e.id));
     else if (a === 'pause') togglePause();
+    else if (a === 'height') toggleHeight();
     else if (a === 'menu') MAIN.menu(true);
     ui.page = 'main';
   }
@@ -440,6 +442,7 @@ const HUD = (() => {
     if (k === ' ') { togglePause(); e.preventDefault(); return; }
     if (k === 'F10') { MAIN.menu(true); e.preventDefault(); return; }
     if (k === 'Home') { centreOn(SIM.hqOf(G, 0)); return; }
+    if ((k === 'h' || k === 'H') && !e.ctrlKey && !e.metaKey) { toggleHeight(); return; }
     // number row by physical key, so Shift+1 is still 1 (on most layouts Shift+1 types '!')
     const digit = /^Digit[0-9]$/.test(e.code || '') ? e.code[5] : /^[0-9]$/.test(k) ? k : null;
     if (digit) {
