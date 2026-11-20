@@ -752,8 +752,19 @@ const RENDER = (() => {
     else if (p.type === 'munitions') { for (let i = -1; i <= 1; i++) c.fillRect(sx + i * 4 * s - 1.2 * s, sy - 5 * s, 2.4 * s, 10 * s); }
     else if (p.type === 'fuel') { c.fillRect(sx - 4 * s, sy - 5 * s, 8 * s, 10 * s); c.fillStyle = '#222'; c.fillRect(sx - 2 * s, sy - 3 * s, 4 * s, 2 * s); }
     else { c.fillRect(sx - 4 * s, sy - 4 * s, 8 * s, 8 * s); }
+    // held but cut off from its owner's supply: a red slash, and under the full-size icon a NO INCOME tag
+    const m = R.G && R.G.map, cut = p.owner >= 0 && m && m.sectors[p.sector] && !m.sectors[p.sector].supplied;
+    if (cut) {
+      c.strokeStyle = '#ff4a3a'; c.lineWidth = 2.6 * s; c.beginPath(); c.moveTo(sx - 8.5 * s, sy + 8.5 * s); c.lineTo(sx + 8.5 * s, sy - 8.5 * s); c.stroke();
+      if (s >= 1) {
+        c.font = '700 10px Inter, system-ui, sans-serif'; const tw = c.measureText('NO INCOME').width;
+        c.fillStyle = 'rgba(70,14,10,.9)'; c.fillRect(sx - tw / 2 - 4, sy + 14, tw + 8, 14);
+        c.fillStyle = '#ffd0c8'; c.textAlign = 'center'; c.fillText('NO INCOME', sx, sy + 25); c.textAlign = 'left';
+      }
+    }
     if (G) {
-      const v = DATA.ECON.point[p.type], txt = (v.mu ? '+' + v.mu + ' munitions ' : '') + (v.fu ? '+' + v.fu + ' fuel' : '') + (p.type === 'victory' ? '  victory point' : '');
+      const v = DATA.ECON.point[p.type], pay = (v.mu ? '+' + v.mu + ' munitions ' : '') + (v.fu ? '+' + v.fu + ' fuel' : '');
+      const txt = cut ? 'Cut off from supply: no income (' + pay.trim() + ' when connected)' + (p.type === 'victory' ? '  victory point still counts' : '') : pay + (p.type === 'victory' ? '  victory point' : '');
       c.font = '600 12px Inter, system-ui, sans-serif'; const w = c.measureText(txt).width;
       c.fillStyle = 'rgba(40,24,14,.85)'; c.fillRect(sx + 16, sy - 9, w + 10, 18); c.fillStyle = '#ffd9a8'; c.fillText(txt, sx + 21, sy + 4);
     }

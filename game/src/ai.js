@@ -83,7 +83,7 @@ const AI = (() => {
       const ang = a / 16 * U.TAU, x = hq.x + Math.cos(ang) * r, y = hq.y + Math.sin(ang) * r;
       // keep behind the HQ (away from the enemy) where possible
       if ((x - y) * dir > (hq.x - hq.y) * dir + 18) continue;
-      if (!SIM.canPlace(G, slot, defId, x, y)) return { x, y };
+      if (!SIM.canPlace(G, slot, defId, x, y) && !SIM.sealsBase(G, slot, defId, x, y)) return { x, y };
     }
     return null;
   }
@@ -97,7 +97,7 @@ const AI = (() => {
     const goals = pts.map(p => {
       let v = p.type === 'victory' ? 3.2 : p.type === 'fuel' ? 2.4 : p.type === 'munitions' ? 2 : 1.3;
       if (p.owner === slot) v *= .45; else if (p.owner === enemy) v *= 1.15;
-      if (!SIM.canCapture(G, slot, p) && p.owner !== slot) v *= .35;
+      if (!SIM.connected(G, slot, p) && p.type !== 'victory') v *= .5;   // a cut-off point pays nothing (victory points still count)
       const threat = visibleEnemies.filter(e => U.dist2(e.x, e.y, p.x, p.y) < 30 * 30).length;
       if (p.owner === slot && threat) v *= 2.5;
       return { p, v, assigned: 0 };

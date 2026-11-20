@@ -357,13 +357,34 @@ const MAP = (() => {
     return true;
   }
   /* nearest walkable cell to (x, y) */
-  function nearestOpen(grid, m, x, y) {
-    if (walkable(grid, m, x, y)) return { x, y };
-    for (let r = 1; r < 30; r++) for (let a = 0; a < 16; a++) {
+  /* nearest open spot; with reach (from mainRegion) only ground joined to the rest of the map counts */
+  function nearestOpen(grid, m, x, y, reach) {
+    const ok = (xx, yy) => walkable(grid, m, xx, yy) && (!reach || reach[(yy | 0) * m.w + (xx | 0)]);
+    if (ok(x, y)) return { x, y };
+    for (let r = 1; r < (reach ? 60 : 30); r++) for (let a = 0; a < 16; a++) {
       const xx = x + Math.cos(a / 16 * U.TAU) * r, yy = y + Math.sin(a / 16 * U.TAU) * r;
-      if (walkable(grid, m, xx, yy)) return { x: xx, y: yy };
+      if (ok(xx, yy)) return { x: xx, y: yy };
     }
-    return { x, y };
+    return reach ? nearestOpen(grid, m, x, y) : { x, y };
+  }
+  /* cells joined to the open ground nearest the map centre (the main battlefield), flood-filled on a nav grid */
+  function regionOf(grid, m) {
+    const W = m.w, n = W * m.h, reach = new Uint8Array(n);
+    const c = nearestOpen(grid, m, m.w / 2, m.h / 2), start = (c.y | 0) * W + (c.x | 0);
+    if (grid[start]) return reach;
+    const stack = [start]; reach[start] = 1;
+    while (stack.length) {
+      const i = stack.pop(), x = i % W, y = (i / W) | 0;
+      if (x > 0 && !grid[i - 1] && !reach[i - 1]) { reach[i - 1] = 1; stack.push(i - 1); }
+      if (x < W - 1 && !grid[i + 1] && !reach[i + 1]) { reach[i + 1] = 1; stack.push(i + 1); }
+      if (y > 0 && !grid[i - W] && !reach[i - W]) { reach[i - W] = 1; stack.push(i - W); }
+      if (y < m.h - 1 && !grid[i + W] && !reach[i + W]) { reach[i + W] = 1; stack.push(i + W); }
+    }
+    return reach;
+  }
+  function mainRegion(m, vehicle) {
+    const nav = navGrids(m), k = vehicle ? 'reachVeh' : 'reachInf';   // cached on the nav grids, rebuilt with them
+    return nav[k] || (nav[k] = regionOf(vehicle ? nav.veh : nav.inf, m));
   }
   function findPath(m, ax, ay, bx, by, vehicle) {
     const nav = navGrids(m), grid = vehicle ? nav.veh : nav.inf, W = m.w;
@@ -404,6 +425,6 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
+  return { hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, mainRegion, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;
