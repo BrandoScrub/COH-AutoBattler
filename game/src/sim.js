@@ -165,6 +165,8 @@ const SIM = (() => {
   /* ---------------- orders ---------------- */
   function issue(G, ids, o, queue) {
     const all = ids.map(id => G.byId.get(id)).filter(e => e && !e.dead);
+    // a standing order (see ai.js) is not a move: it sticks whatever the unit is doing, and the unit acts on it when it can
+    if (o.type === 'role') { for (const e of all) if (e.type !== 'building') { e.role = o.role; e.reRole = true; } return; }
     // a retreat cannot be called off (as in CoH3): retreating squads ignore every order until they reach base
     const ents = all.filter(e => !e.retreating || o.type === 'retreat');
     if (!ents.length && all.length) { const r = all[0]; event(G, r.owner, 'error', 'Retreating: orders resume once the squad reaches base', r.x, r.y); return; }
@@ -305,7 +307,7 @@ const SIM = (() => {
     const P = G.players[b.owner];
     if (o.type === 'produce') {
       if (prodBlock(G, b, o.unit)) return;
-      const u = unitDef(o.unit); pay(P, u.cost); b.queue.push({ unit: o.unit, t: 0, total: u.time }); popRecount(G);
+      const u = unitDef(o.unit); pay(P, u.cost); b.queue.push({ unit: o.unit, t: 0, total: u.time, role: o.role }); popRecount(G);
     } else if (o.type === 'cancel') {
       const q = b.queue[o.index]; if (!q) return; pay(P, unitDef(q.unit).cost, -1); b.queue.splice(o.index, 1); popRecount(G);
     } else if (o.type === 'rally' || o.type === 'move') { b.rally = { x: o.x, y: o.y }; }
@@ -323,6 +325,7 @@ const SIM = (() => {
         const isV = !D.SQUADS[q.unit], nav = MAP.navGrids(G.map);
         const p = MAP.nearestOpen(isV ? nav.veh : nav.inf, G.map, sx, sy, MAP.mainRegion(G.map, isV));   // ground a vehicle can use, joined to the battlefield
         const e = isV ? spawnVehicle(G, q.unit, b.owner, p.x, p.y, ang) : spawnSquad(G, q.unit, b.owner, p.x, p.y);
+        if (q.role) e.role = q.role;
         orderEnt(G, e, { type: 'move', x: b.rally.x + G.rng.range(-3, 3), y: b.rally.y + G.rng.range(-3, 3) });
         event(G, b.owner, 'ready', e.def.name + ' ready', e.x, e.y);
         popRecount(G);

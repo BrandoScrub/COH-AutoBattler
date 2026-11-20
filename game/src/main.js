@@ -60,7 +60,8 @@ const MAIN = (() => {
 
   /* ---------------- a match ---------------- */
   /* mode: 'skirmish' (1v1 against the AI), 'sandbox' (the same with 10,000 of everything, for testing)
-     or 'spectate' (AI against AI, no fog, no orders) */
+     or 'spectate' (AI against AI, no fog, no orders). In the first two the player spends and sets each unit's
+     standing order; the unit AI (AI.step with manual set) moves and fights the player's units. */
   function start(s, m) {
     if (!ready) return;
     side = s || side; mode = m || mode;
@@ -74,14 +75,14 @@ const MAIN = (() => {
       const canvas = $('#view');
       RENDER.init(canvas, lib, G);
       HUD.init(G, canvas);
-      HUD.ui.selected = spec ? new Set() : new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
+      HUD.ui.selected = spec ? new Set() : new Set(G.ents.filter(e => e.owner === 0 && e.type === 'building').map(e => e.id));
       HUD.ui.paused = false; HUD.ui.noFog = spec; HUD.ui.mode = null;
       resize();
       applyLayout.zoomed = false; applyLayout();
       show('game');
       if (spec) { RENDER.cam.x = G.map.w / 2; RENDER.cam.y = G.map.h / 2; HUD.flash('Watching the AI: no fog, no orders. Pick a speed under the score; Space pauses.'); }
       else if (mode === 'sandbox') HUD.flash('Sandbox: 10,000 manpower, munitions and fuel to test with.');
-      else HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
+      else HUD.flash('Order base buildings and units from the HQ. Tap a unit to change its standing order.');
     }, 30);
   }
   function toMain() {
@@ -123,7 +124,7 @@ const MAIN = (() => {
     if (!inMenu && !HUD.ui.paused && !G.over) {
       acc += dt * speed;
       let n = 0;
-      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); if (G.spectate) AI.step(G, 0); SIM.step(G, SIM.DT); acc -= SIM.DT; }
+      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); AI.step(G, 0, !G.spectate); SIM.step(G, SIM.DT); acc -= SIM.DT; }
       if (n > 8) acc = 0;
     }
     HUD.tick(dt);

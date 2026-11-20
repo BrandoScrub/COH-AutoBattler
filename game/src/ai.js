@@ -1,7 +1,12 @@
-/* Skirmish AI: plays by the same rules and sees through the same fog as the player. Each second it spends
-   resources (units and buildings in tech order), sends squads to the points worth taking or defending, pulls back
-   squads and vehicles that are losing, sets up team weapons facing the enemy, throws grenades at enemies in cover
-   and points anti-tank units at enemy vehicles. */
+/* Unit AI for both armies. Every unit carries a standing order (`role`) and works it out for itself:
+     capture  take points the army does not hold, enemy-held ones first
+     hunt     go after enemy units as one party; with none in sight, push on the last place they were seen
+     defend   hold the army's own points on the border, in houses and behind sandbags
+     supply   take and keep the points that pay income, nearest home first
+   The opposing AI also spends its own resources (units and buildings in tech order) and hands out orders; the
+   player spends and picks orders by hand and never moves a unit directly (`manual`). Either way each unit pulls
+   back when it is losing, sets up team weapons facing the enemy, throws grenades at enemies in cover and points
+   anti-tank weapons at enemy vehicles. It sees through the same fog as the player. */
 const AI = (() => {
   const D = DATA;
   /* unit wishes by phase: [unit, weight]; tech follows FACTIONS[side].buildings */
@@ -10,13 +15,46 @@ const AI = (() => {
     us: { early: [['us_riflemen', 5], ['us_hmg', 1.5], ['us_engineers', .4], ['us_jeep', .6]], mid: [['us_riflemen', 3], ['us_hmg', 1], ['us_mortar', 1], ['us_bazooka', 1.5], ['us_m8', 1.2], ['us_at_gun', 1.2], ['us_halftrack', .4], ['us_sniper', .5], ['us_chaffee', .8]], late: [['us_sherman', 3], ['us_m10', 2], ['us_riflemen', 2], ['us_at_gun', 1], ['us_bazooka', 1]] },
   };
   const CAP = { de_bike: 1, us_jeep: 1, de_mortar: 2, us_mortar: 2, de_hmg: 2, us_hmg: 2, de_sniper: 1, us_sniper: 1, de_251: 1, us_halftrack: 1 };
-  function step(G, slot) {
+  /* standIn: the four standing orders are this game's own; CoH3 has no counterpart */
+  const ROLES = {
+    capture: { name: 'Capture', icon: 'roleCapture', tip: 'Take points you do not hold, enemy-held ones first.' },
+    hunt: { name: 'Hunt', icon: 'roleHunt', tip: 'Go after enemy units together with your other hunters. With none in sight, push on where they were last seen.' },
+    defend: { name: 'Defend', icon: 'roleDefend', tip: 'Hold your own points on the border: infantry take houses, team weapons set up facing the enemy, engineers lay sandbags.' },
+    supply: { name: 'Supply', icon: 'roleSupply', tip: 'Take and keep the points that pay munitions and fuel, nearest home first. Engineers also repair vehicles.' },
+  };
+  /* manual: a human spends for this army and picks each unit's order; the units still act on their own */
+  function step(G, slot, manual) {
     const S = (G.ai || (G.ai = {}))[slot] || (G.ai[slot] = {}), me = G.players[slot];
     if ((S.t || 0) > G.t) return;
     S.t = G.t + 1;
     const mine = G.ents.filter(e => !e.dead && e.owner === slot);
-    spend(G, me, mine, S);
-    command(G, me, mine, S);
+    if (manual) finishBuildings(mine); else spend(G, me, mine, S);
+    command(G, me, mine, S, manual);
+  }
+  /* builders go and finish any building still going up */
+  function finishBuildings(mine) {
+    const builders = mine.filter(e => e.type === 'squad' && e.def.builder && !e.retreating);
+    for (const b of mine) if (b.type === 'building' && b.built < 1) for (const p of builders) if (p.order.type !== 'build') { p.buildQueue = [{ kind: 'building', id: b.id }]; p.order = { type: 'build' }; }
+  }
+  /* place a base building for `slot` on a free spot by its HQ and send a builder; returns why not, or null */
+  function build(G, slot, defId) {
+    const me = G.players[slot], why = SIM.buildReqMissing(G, slot, defId) || (!SIM.canAfford(me, D.BUILDINGS[defId].cost) ? 'Not enough resources' : null);
+    if (why) return why;
+    const builders = G.ents.filter(e => !e.dead && e.owner === slot && e.type === 'squad' && e.def.builder && !e.retreating);
+    if (!builders.length) return 'No ' + SIM.unitDef(me.F.builder).name + ' to build it: train one at the HQ';
+    const spot = findSpot(G, slot, defId); if (!spot) return 'No room by the HQ';
+    builders.sort((a, b) => (a.order.type === 'build') - (b.order.type === 'build'));
+    SIM.issue(G, [builders[0].id], { type: 'build', what: defId, x: spot.x, y: spot.y });
+    return null;
+  }
+  /* the order a new unit starts on when nobody picked one */
+  function defaultRole(G, me, e, manual) {
+    if (e.def.builder) return 'supply';
+    if (manual) return me.newRole || 'capture';
+    const r = G.rng();
+    if (e.type === 'squad' && e.def.crewWeapon) return r < .55 ? 'defend' : 'capture';
+    if (e.type === 'vehicle') return r < .5 ? 'hunt' : 'capture';
+    return r < .55 ? 'capture' : r < .75 ? 'hunt' : r < .9 ? 'defend' : 'supply';
   }
 
   function spend(G, me, mine, S) {
@@ -88,7 +126,7 @@ const AI = (() => {
     return null;
   }
 
-  function command(G, me, mine, S) {
+  function command(G, me, mine, S, manual) {
     const slot = me.slot, enemy = 1 - slot, pts = G.map.points;
     const hq = SIM.hqOf(G, slot); if (!hq) return;
     const enemyHq = SIM.hqOf(G, enemy);
@@ -100,10 +138,22 @@ const AI = (() => {
       if (!SIM.connected(G, slot, p) && p.type !== 'victory') v *= .5;   // a cut-off point pays nothing (victory points still count)
       const threat = visibleEnemies.filter(e => U.dist2(e.x, e.y, p.x, p.y) < 30 * 30).length;
       if (p.owner === slot && threat) v *= 2.5;
-      return { p, v, assigned: 0 };
+      // on the border: a neighbouring sector is not ours
+      const border = p.owner === slot && [...G.map.sectors[p.sector].neigh].some(n => G.map.sectors[n].owner !== slot);
+      return { p, v, threat, border, assigned: 0 };
     });
     const units = mine.filter(e => e.type !== 'building');
+    // the hunting party shares one quarry: the enemy in sight nearest the party's middle; else where one was last seen
+    const hunters = units.filter(e => e.role === 'hunt' && !e.retreating);
+    let quarry = null;
+    if (hunters.length) {
+      const cx = hunters.reduce((a, e) => a + e.x, 0) / hunters.length, cy = hunters.reduce((a, e) => a + e.y, 0) / hunters.length;
+      let bd = 1e9; for (const o of visibleEnemies) { const d = U.dist2(o.x, o.y, cx, cy); if (d < bd) { bd = d; quarry = o; } }
+      if (quarry) S.lastSeen = { x: quarry.x, y: quarry.y, t: G.t };
+      else if (S.lastSeen && (G.t - S.lastSeen.t > 90 || hunters.some(e => U.dist2(e.x, e.y, S.lastSeen.x, S.lastSeen.y) < 10 * 10))) S.lastSeen = null;
+    }
     for (const e of units) {
+      if (!e.role || !ROLES[e.role]) e.role = defaultRole(G, me, e, manual);
       // pull back when losing
       if (e.type === 'squad') {
         const al = e.models.filter(m => m.alive).length;
@@ -159,36 +209,62 @@ const AI = (() => {
         if (v) { SIM.issue(G, [e.id], { type: 'recrew', target: v.id }); continue; }
       }
       // a garrison mostly holds its house
-      if (e.garrison != null && G.rng() > .04) continue;
+      if (e.garrison != null && !e.reRole && G.rng() > .04) continue;
       // busy moving or fighting: let it be, but re-target now and then
       const busy = (e.path && e.path.length) || e.order.type === 'attack' || (e.crew && e.crew.state !== 'packed' && G.t - e.lastFire < 8) || (G.t - e.lastFire < 3);
-      if (busy && G.rng() > .08) continue;
-      if (e.crew && e.crew.state !== 'packed' && G.rng() > .05) continue;
-      // pick a goal: high value, near, not already crowded
-      let best = null, bs = -1e9;
-      for (const g of goals) {
-        const d = Math.hypot(g.p.x - e.x, g.p.y - e.y);
-        // builders take only points close to home: losing the only builder stalls the whole tech tree
-        if (e.def.builder && Math.hypot(g.p.x - hq.x, g.p.y - hq.y) > 75) continue;
-        const s = g.v * 40 - d * .35 - g.assigned * 25 + (e.type === 'vehicle' && g.p.type === 'victory' ? 20 : 0);
-        if (s > bs) { bs = s; best = g; }
+      if (busy && !e.reRole && G.rng() > .08) continue;
+      if (e.crew && e.crew.state !== 'packed' && !e.reRole && G.rng() > .05) continue;
+      // work the standing order: where to go for it
+      let role = e.role;
+      const own = goals.filter(g => g.p.owner === slot), open = goals.filter(g => g.p.owner !== slot);
+      if (role === 'supply' && !open.some(g => SIM.connected(G, slot, g.p))) role = 'defend';   // nothing left to take that would pay
+      if (role === 'defend' && !own.length) role = 'capture';
+      if (role === 'capture' && !open.length) role = 'defend';
+      let best = null, bs = -1e9, tx, ty;
+      if (role === 'hunt') {
+        const q = quarry || S.lastSeen || open.filter(g => g.p.owner === enemy).map(g => g.p).sort((a, b) => U.dist2(a.x, a.y, e.x, e.y) - U.dist2(b.x, b.y, e.x, e.y))[0] || enemyHq;
+        if (!q) continue;
+        if (quarry && U.dist2(q.x, q.y, e.x, e.y) < 14 * 14) continue;   // in contact: the squad fights it out where it stands
+        tx = q.x + G.rng.range(-3, 3); ty = q.y + G.rng.range(-3, 3);
+      } else {
+        for (const g of role === 'defend' ? own : open) {
+          const d = Math.hypot(g.p.x - e.x, g.p.y - e.y), t = g.p.type;
+          // builders take only points close to home: losing the only builder stalls the whole tech tree
+          if (e.def.builder && role !== 'defend' && Math.hypot(g.p.x - hq.x, g.p.y - hq.y) > 75) continue;
+          let s;
+          if (role === 'capture') s = g.v * (g.p.owner === enemy ? 1.3 : 1) * 40 - d * .35 - g.assigned * 25 + (e.type === 'vehicle' && t === 'victory' ? 20 : 0);
+          else if (role === 'supply') { if (!SIM.connected(G, slot, g.p)) continue; s = (t === 'fuel' ? 3 : t === 'munitions' ? 2.6 : t === 'standard' ? 1.6 : 1) * 40 - d * .35 - Math.hypot(g.p.x - hq.x, g.p.y - hq.y) * .2 - g.assigned * 25; }
+          else s = (t === 'victory' ? 3 : t === 'standard' ? 1.4 : 2.2) * (g.border ? 2 : .6) * (g.threat ? 2.5 : 1) * 40 - d * .35 - g.assigned * 30;
+          if (s > bs) { bs = s; best = g; }
+        }
+        if (!best) continue;
+        best.assigned++;
       }
-      if (!best) continue;
-      best.assigned++;
-      const p = best.p;
-      // team weapons sit a little back from the point, facing the enemy
+      e.reRole = false;
+      const p = best ? best.p : { x: tx, y: ty };
+      // team weapons sit a little back from the spot, facing the enemy
       const toward = enemyHq ? Math.atan2(enemyHq.y - p.y, enemyHq.x - p.x) : 0;
-      let tx = p.x + G.rng.range(-4, 4), ty = p.y + G.rng.range(-4, 4);
+      if (best) { tx = p.x + G.rng.range(-4, 4); ty = p.y + G.rng.range(-4, 4); }
       if (e.crew) { tx = p.x - Math.cos(toward) * 8; ty = p.y - Math.sin(toward) * 8; }
-      // infantry sometimes hold the point from a house beside it
-      if (e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < .3) {
-        const h = G.map.houses.find(h => !h.dead && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
+      if (role === 'defend') {
+        // engineers on the spot wall it once: a sandbag line across the enemy's side
+        if (e.def.builder && U.dist2(p.x, p.y, e.x, e.y) < 12 * 12 && !(p.fort && p.fort[slot])) {
+          (p.fort || (p.fort = {}))[slot] = true;
+          const fx = p.x + Math.cos(toward) * 7, fy = p.y + Math.sin(toward) * 7, sx = -Math.sin(toward) * 6, sy = Math.cos(toward) * 6;
+          SIM.issue(G, [e.id], { type: 'build', what: 'sandbags', x: fx - sx, y: fy - sy, x2: fx + sx, y2: fy + sy }); continue;
+        }
+        // defenders stand on the enemy's side of the point
+        if (!e.crew) { tx += Math.cos(toward) * 4; ty += Math.sin(toward) * 4; }
+      }
+      // infantry hold a point from a house beside it: defenders mostly, the others sometimes
+      if (best && e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < (role === 'defend' ? .7 : .3) && (role === 'defend' || best.p.owner === slot)) {
+        const h = G.map.houses.find(h => !h.dead && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < (role === 'defend' ? 20 : 14) ** 2);
         if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
       }
       if (U.dist2(tx, ty, e.x, e.y) < 6 * 6) continue;   // already there
       SIM.issue(G, [e.id], { type: e.crew ? 'move' : 'attackMove', x: tx, y: ty, face: toward });
     }
   }
-  return { step };
+  return { step, build, ROLES };
 })();
 if (typeof module !== 'undefined') module.exports = AI;

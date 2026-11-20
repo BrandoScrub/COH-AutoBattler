@@ -1,4 +1,4 @@
-"""Phone check: landscape iPhone viewport with touch. Taps select and order, drag pans, pinch zooms, long-press attack-moves."""
+"""Phone check: landscape iPhone viewport with touch. Taps select, card buttons set orders and spend, drag pans, pinch zooms; no tap moves a unit."""
 import asyncio, sys
 from playwright.async_api import async_playwright
 URL = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8765/game/index.html'
@@ -19,10 +19,19 @@ async def main():
         await pg.evaluate("() => { HUD.ui.paused = true; }")
         print('mobile class', await pg.evaluate("document.body.className"), await pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--s')"))
         await pg.screenshot(path='/tmp/shots/m1-start.png')
-        # tap empty ground with the engineers selected -> they move
+        # the HQ card: tap the first base building (bottom row, first slot); it is placed for the player
+        await pg.tap('.card .slot:nth-child(9)'); await pg.wait_for_timeout(300)
+        print('after HQ building tap', await pg.evaluate("() => G.ents.filter(e => e.owner === 0 && e.type === 'building').map(b => b.defId + ':' + b.built.toFixed(2))"), '| banner:', await pg.evaluate("() => document.querySelector('.banner').textContent"))
+        await pg.screenshot(path='/tmp/shots/m2-build.png')
+        # new units start on Defend (middle row, third slot)
+        await pg.tap('.card .slot:nth-child(7)'); await pg.wait_for_timeout(200)
+        print('new units start on', await pg.evaluate("() => G.players[0].newRole"))
+        # tap empty ground with the engineers selected -> nothing is ordered, the selection clears
+        await pg.evaluate("() => { HUD.ui.selected = new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id)); }")
         sel = await pg.evaluate("() => [...HUD.ui.selected]")
+        o0 = await pg.evaluate("(ids) => ids.map(id => G.byId.get(id).order.type)", sel)
         await tap(600, 150); await pg.wait_for_timeout(300)
-        print('after ground tap: order', await pg.evaluate("(ids) => ids.map(id => G.byId.get(id).order.type)", sel))
+        print('ground tap leaves orders alone', o0 == await pg.evaluate("(ids) => ids.map(id => G.byId.get(id).order.type)", sel), '| selection now', await pg.evaluate("() => HUD.ui.selected.size"))
         # clear, then tap on the engineers to select them
         await pg.evaluate("() => { HUD.ui.selected.clear(); }")
         await pg.wait_for_timeout(200)
@@ -42,33 +51,10 @@ async def main():
         for i in range(1, 8): await touch('touchMove', [(400 - i * 12, 200), (460 + i * 12, 200)]); await pg.wait_for_timeout(16)
         await touch('touchEnd', [])
         print('pinch zoom', round(k0, 2), '->', await pg.evaluate("() => +RENDER.cam.k.toFixed(2)"))
-        # long-press: attack-move
-        await touch('touchStart', [(560, 140)]); await pg.wait_for_timeout(700); await touch('touchEnd', [])
-        print('after long-press', await pg.evaluate("() => [...HUD.ui.selected].map(id => G.byId.get(id).order.type)"))
-        # command card button by tap (construct page), tooltip by long-press
-        await pg.tap('.card .slot:nth-child(12)'); await pg.wait_for_timeout(300)
-        print('page after Construct tap', await pg.evaluate("() => HUD.ui.page"))
-        await pg.screenshot(path='/tmp/shots/m2-build.png')
-        # place a Barracks by touch: tap its button, drag the outline to open ground, lift
-        await pg.tap('.card .slot:nth-child(5)'); await pg.wait_for_timeout(300)
-        print('mode after Barracks tap', await pg.evaluate("() => HUD.ui.mode && HUD.ui.mode.type"))
-        spot = await pg.evaluate("""() => { const hq = SIM.hqOf(G, 0); RENDER.cam.x = hq.x + 10; RENDER.cam.y = hq.y - 10;
-          for (let r = 16; r < 34; r += 2) for (let a = 0; a < 24; a++) { const x = hq.x + Math.cos(a / 24 * U.TAU) * r, y = hq.y + Math.sin(a / 24 * U.TAU) * r; if (!SIM.canPlace(G, 0, 'us_barracks', x, y)) { const s = RENDER.toScreen(x, y); if (s[0] > 300 && s[0] < 600 && s[1] > 80 && s[1] < 230) return s; } } return null; }""")
-        print('target spot', spot)
-        await pg.wait_for_timeout(200)
-        await touch('touchStart', [(422, 164)])
-        for i in range(1, 9): await touch('touchMove', [(422 + (spot[0] - 422) * i / 8, 164 + (spot[1] - 164) * i / 8)]); await pg.wait_for_timeout(16)
-        await pg.screenshot(path='/tmp/shots/m2b-ghost.png')
-        await touch('touchEnd', []); await pg.wait_for_timeout(300)
-        print('after drag-place', await pg.evaluate("() => G.ents.filter(e => e.owner === 0 && e.type === 'building').map(b => b.defId + ':' + b.built.toFixed(2))"), 'mode', await pg.evaluate("() => HUD.ui.mode"))
-        # and a plain tap on a bad spot (on the HQ) explains itself
-        await pg.evaluate("() => { HUD.ui.selected = new Set(G.ents.filter(e => e.type === 'squad' && e.owner === 0).map(e => e.id)); HUD.ui.page = 'build'; G.players[0].res = { mp: 900, mu: 100, fu: 200 }; }")
-        await pg.wait_for_timeout(200)
-        await pg.tap('.card .slot:nth-child(6)'); await pg.wait_for_timeout(200)
-        hq = await pg.evaluate("() => { const h = SIM.hqOf(G, 0); RENDER.cam.x = h.x; RENDER.cam.y = h.y; RENDER.cam.k = 1; return RENDER.toScreen(h.x, h.y); }")
-        await tap(hq[0], hq[1]); await pg.wait_for_timeout(200)
-        print('bad-spot banner:', await pg.evaluate("() => document.querySelector('.banner').textContent"), '| still placing:', await pg.evaluate("() => HUD.ui.mode && HUD.ui.mode.type"))
-        await pg.evaluate("() => { HUD.ui.mode = null; HUD.ui.page = 'main'; }")
+        # a unit's card: tap Hunt (top row, second slot), then long-press a button to read it
+        await pg.tap('.card .slot:nth-child(2)'); await pg.wait_for_timeout(300)
+        print('unit order after Hunt tap', await pg.evaluate("() => [...HUD.ui.selected].map(id => G.byId.get(id).defId + '/' + G.byId.get(id).role)"))
+        await pg.screenshot(path='/tmp/shots/m2b-unit.png')
         # minimap tap moves the camera
         box = await pg.locator('.mmframe canvas').bounding_box()
         await tap(box['x'] + box['width'] * .8, box['y'] + box['height'] * .5); await pg.wait_for_timeout(200)
@@ -78,7 +64,7 @@ async def main():
         print('portrait class', await pg.evaluate("document.body.className"))
         await pg.screenshot(path='/tmp/shots/m3-portrait.png')
         await pg.set_viewport_size({'width': 844, 'height': 390}); await pg.wait_for_timeout(300)
-        await pg.evaluate("() => { HUD.ui.paused = false; for (let i = 0; i < 20 * 150; i++) { AI.step(G, 1); AI.step(G, 0); SIM.step(G, SIM.DT); } const e = G.ents.filter(e => e.owner === 0 && e.type === 'squad' && !e.dead).pop(); if (e) { RENDER.cam.x = e.x; RENDER.cam.y = e.y; HUD.ui.selected = new Set([e.id]); } }")
+        await pg.evaluate("() => { HUD.ui.paused = false; G.players[0].res.mp = 2000; const hq = SIM.hqOf(G, 0); for (let i = 0; i < 20 * 150; i++) { if (i % 600 === 0) for (const b of G.ents) if (b.type === 'building' && b.owner === 0 && b.built >= 1 && !b.def.retreat) SIM.issue(G, [b.id], { type: 'produce', unit: b.def.produce[0], role: ['capture', 'hunt', 'defend'][i / 600 % 3 | 0] }); AI.step(G, 1); AI.step(G, 0, true); SIM.step(G, SIM.DT); } const e = G.ents.filter(e => e.owner === 0 && e.type === 'squad' && !e.dead).pop(); if (e) { RENDER.cam.x = e.x; RENDER.cam.y = e.y; HUD.ui.selected = new Set([e.id]); } }")
         await pg.wait_for_timeout(800)
         await pg.screenshot(path='/tmp/shots/m4-play.png')
         print(errs or 'no page errors')

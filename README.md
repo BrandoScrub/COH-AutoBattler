@@ -1,10 +1,17 @@
-# Tactical WW2 RTS
+# COH AutoBattler
 
-A Company of Heroes 3 style tactical RTS in the browser, American against German, Italy 1944. Playable now: a 1v1
-skirmish against the AI with victory points, on PC (mouse and keyboard) or a phone (touch). The 70 animated units
-(vehicles, crew weapons and infantry, both sides) are modelled and exported with the art engine artkit
-(BrandoScrub/Game-Engine-System-Design) by its DESIGN_METHOD.md; the HUD and rules follow the annotated CoH3
-reference in `docs/reference/coh3/`.
+An autobattler built on the Company of Heroes 3 formula, in the browser: American against German, Italy 1944. You run
+the battle, not the squads. You spend manpower, munitions and fuel on base buildings (CoH3 tech tiers), units and
+upgrades, and give each unit one of four standing orders: **Capture** (take points you do not hold, enemy-held ones
+first), **Hunt** (go after enemy units as one party), **Defend** (hold your border points: houses, team weapons set
+up, engineers lay sandbags) or **Supply** (take and keep the points that pay munitions and fuel). Units move, fight
+and fall back on their own; the only direct order is Retreat. Playable now: a 1v1 match against the AI with victory
+points, on PC or a phone.
+
+It started as a copy of BrandoScrub/tactical-ww2-rts (the hand-controlled RTS) and shares its rules, numbers, map and
+art: the 70 animated units are modelled and exported with the art engine artkit (BrandoScrub/Game-Engine-System-Design)
+by its DESIGN_METHOD.md, and the HUD and rules follow the annotated CoH3 reference in `docs/reference/coh3/`. The
+standing orders are this game's own (no CoH3 counterpart).
 
 ## Play
 Serve the repository root (`python3 -m http.server`) and open `game/index.html`, or build a folder for any static host
@@ -20,18 +27,20 @@ game/src/sim.js    orders, movement, territory and supply, economy and upkeep, p
                    reinforcement, retreat, veterancy, victory points (fixed 20 steps a second)
 game/src/combat.js targets, hits, directional cover, suppression, armour facing and penetration, explosions
 game/src/fog.js    fog of war with true line of sight
-game/src/ai.js     the skirmish opponent (either side)
+game/src/ai.js     unit AI for both armies: the four standing orders, retreats, abilities; the opponent's spending
 game/src/render.js isometric drawing with the artkit sprites; game-world markers
-game/src/hud.js    HUD, command card (QWER / ASDF / ZXCV), mouse, keyboard and touch input
+game/src/hud.js    HUD, command card (orders, production, base buildings, upgrades), mouse, keyboard and touch input
 game/src/main.js   boot, menus, main loop
-game/test/         node: headless.js (duels), aivsai.js (one match), soak.js (many matches with invariant checks);
+game/test/         node: headless.js (duels), aivsai.js (one match), soak.js (many matches with invariant checks),
+                   roles.js (each standing order shows in what its units do);
                    headless Chrome: flow.py (opening by input), battle.py, browser.py, mobile.py (phone), restart.py
 ```
 Unit numbers come from CoH3 game data (coh3stats.com, patch 3.0.1). Units with no CoH3 counterpart in their slot are
 marked `standIn` with the slot they fill. Player buildings are flat stand-ins until they are modelled, and battlegroups
 are structure only until they are designed.
 
-Before a commit that touches `game/`: `node game/test/soak.js 8 18` prints `no problems`, and `python3 game/test/flow.py de`
+Before a commit that touches `game/`: `node game/test/soak.js 8 18` prints `no problems`, `node game/test/roles.js` prints
+`orders ok`, and `python3 game/test/flow.py de`
 and `python3 game/test/mobile.py` print `no page errors` (both need `python3 -m http.server 8765` running at the root).
 
 ## Layout

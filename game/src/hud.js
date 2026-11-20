@@ -1,4 +1,7 @@
-/* HUD and controls, laid out after the annotated CoH3 boards in docs/reference/coh3:
+/* HUD and controls. This is an autobattler: the player spends resources (units, base buildings, upgrades) and gives
+   each unit a standing order (capture, hunt, defend, supply; see ai.js), and the units move and fight on their own.
+   Nothing here moves a unit directly; the one direct order left is Retreat.
+   Laid out after the annotated CoH3 boards in docs/reference/coh3:
    status top-left, victory ticker top-centre, roster top-right, minimap bottom-left, resources + production tabs +
    unit panel + 4x3 command card bottom-right, command-point dial on the right edge. The command card binds keys by
    slot position (QWER / ASDF / ZXCV), so every unit uses the same finger for the same slot. */
@@ -44,6 +47,10 @@ const HUD = (() => {
     smoke: g => { g.fillStyle = '#c9c9c4'; for (const [x, y, r] of [[-7, 4, 8], [4, 2, 9], [-1, -7, 8], [9, -6, 6]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); } g.fillStyle = '#555'; g.fillRect(-12, 10, 6, 6); },
     breach: g => { g.fillStyle = '#8a6a44'; g.fillRect(-8, -14, 16, 26); g.fillStyle = '#222'; g.fillRect(-5, -10, 10, 22); g.fillStyle = '#ffb03a'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, r = i % 2 ? 5 : 11; g.lineTo(9 + Math.cos(a) * r, 2 + Math.sin(a) * r); } g.fill(); },
     unload: g => { g.fillStyle = '#c9b88c'; g.beginPath(); g.moveTo(-14, -2); g.lineTo(-4, -12); g.lineTo(6, -2); g.lineTo(6, 12); g.lineTo(-14, 12); g.closePath(); g.fill(); g.fillStyle = '#5ad6ff'; g.beginPath(); g.moveTo(16, 4); g.lineTo(6, -4); g.lineTo(6, 0); g.lineTo(-2, 0); g.lineTo(-2, 8); g.lineTo(6, 8); g.lineTo(6, 12); g.closePath(); g.fill(); },
+    roleCapture: g => { g.strokeStyle = '#ddd'; g.beginPath(); g.moveTo(-9, 15); g.lineTo(-9, -15); g.stroke(); g.fillStyle = '#e6b450'; g.beginPath(); g.moveTo(-9, -15); g.lineTo(14, -8); g.lineTo(-9, -1); g.closePath(); g.fill(); },
+    roleHunt: g => { g.strokeStyle = '#ff6a5a'; g.beginPath(); g.arc(0, 0, 11, 0, 7); g.moveTo(-17, 0); g.lineTo(-5, 0); g.moveTo(5, 0); g.lineTo(17, 0); g.moveTo(0, -17); g.lineTo(0, -5); g.moveTo(0, 5); g.lineTo(0, 17); g.stroke(); g.fillStyle = '#ff6a5a'; g.beginPath(); g.arc(0, 0, 2.5, 0, 7); g.fill(); },
+    roleDefend: g => { g.fillStyle = '#6cb6ff'; g.beginPath(); g.moveTo(-12, -13); g.lineTo(12, -13); g.lineTo(12, 2); g.quadraticCurveTo(10, 12, 0, 16); g.quadraticCurveTo(-10, 12, -12, 2); g.closePath(); g.fill(); },
+    roleSupply: g => { g.fillStyle = '#8fca5a'; g.fillRect(-13, -4, 26, 17); g.strokeStyle = '#2c4a18'; g.lineWidth = 2; g.strokeRect(-13, -4, 26, 17); g.beginPath(); g.moveTo(0, -4); g.lineTo(0, 13); g.stroke(); g.fillStyle = '#b9e58a'; g.fillRect(-9, -13, 18, 8); },
     lock: g => { g.strokeStyle = '#999'; g.beginPath(); g.arc(0, -4, 7, Math.PI, 0); g.stroke(); g.fillStyle = '#999'; g.fillRect(-10, -4, 20, 15); },
   };
   const ico = name => icon(name, ICONS[name] || ICONS.stop);
@@ -65,15 +72,17 @@ const HUD = (() => {
 
   /* ---------------- build the DOM ---------------- */
   /* every order the player gives goes through here; watching an AI match, nothing is ordered */
-  function issue(...a) { if (G.spectate) return; return SIM.issue(...a); }
+  const PLAYER_ORDERS = new Set(['produce', 'cancel', 'upgrade', 'retreat', 'role']);
+  function issue(...a) { if (G.spectate || !PLAYER_ORDERS.has(a[2].type)) return; return SIM.issue(...a); }
+  const roleOf = e => AI.ROLES[e.role] ? e.role : null;
   function init(game, canvas) {
-    G = game; canvasEl = canvas;
+    G = game; canvasEl = canvas; if (!G.players[0].newRole) G.players[0].newRole = 'capture';
     const root = $('#hud'); root.innerHTML = '';
     el.ticker = h('div', 'ticker', `<div class="vp vp0"><b></b><i><s></s></i></div><div class="stars"></div><div class="vp vp1"><i><s></s></i><b></b></div><div class="clock"></div>`);
     el.alerts = h('div', 'alerts');
     el.roster = h('div', 'roster', '<div class="r-units"></div><div class="r-structs"></div>');
     el.mm = h('div', 'mmwrap', `<div class="mmframe"><canvas width="236" height="236"></canvas><div class="north">N</div></div>
-      <div class="mmbtns"><button data-a="menu" title="Menu (F10)">&#9776;</button><button data-a="selv" title="Select all vehicles">${'<img src="' + glyphIcon('tank') + '">'}</button><button data-a="seli" title="Select all infantry">${'<img src="' + glyphIcon('infantry') + '">'}</button><button data-a="height" title="Height view (H)">&#9650;</button><span class="logo">TACTICAL<br>WW2</span><button data-a="pause" title="Tactical pause (Space)">&#10074;&#10074;</button></div>`);
+      <div class="mmbtns"><button data-a="menu" title="Menu (F10)">&#9776;</button><button data-a="selv" title="Select all vehicles">${'<img src="' + glyphIcon('tank') + '">'}</button><button data-a="seli" title="Select all infantry">${'<img src="' + glyphIcon('infantry') + '">'}</button><button data-a="height" title="Height view (H)">&#9650;</button><span class="logo">COH<br>AUTO</span><button data-a="pause" title="Tactical pause (Space)">&#10074;&#10074;</button></div>`);
     el.bg = h('div', 'bgstrip', `<div class="bgtile" title="Battlegroups: the structure is in place (choose one of three, two branches, pick-one pairs). Content arrives when the battlegroups are designed."><span>BATTLE<br>GROUP</span></div><div class="dial" title="Command points: earned from veterancy experience; spend them on battlegroup abilities once battlegroups exist."><b>0</b><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" /></svg></div>`);
     el.bottom = h('div', 'bottom', `
       <div class="resrow"><div class="res mp"><i></i><b></b><small></small></div><div class="res mu"><i></i><b></b><small></small></div><div class="res fu"><i></i><b></b><small></small></div><div class="res pop"><i></i><b></b><small></small></div></div>
@@ -125,66 +134,38 @@ const HUD = (() => {
   function cardFor() {
     const sel = G.spectate ? [] : selEnts().filter(e => e.owner === 0), out = new Array(12).fill(null);
     if (!sel.length) return out;
-    const e = sel[0], P = G.players[0];
+    const e = sel[0], P = G.players[0], roles = Object.keys(AI.ROLES);
     if (e.type === 'building') {
       if (e.built < 1) return out;
-      const keys = [0, 1, 2, 3, 4, 5];
-      e.def.produce.forEach((u, i) => {
-        const def = SIM.unitDef(u), why = SIM.prodBlock(G, e, u);
-        out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };
+      // top row: the units it trains; they start on the order picked in the middle row
+      e.def.produce.slice(0, 4).forEach((u, i) => {
+        const def = SIM.unitDef(u), why = SIM.prodBlock(G, e, u), r = def.builder ? 'supply' : P.newRole;
+        out[i] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div><div class="note">Starts on: ${AI.ROLES[r].name}</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u, role: r }) };
       });
-      out[7] = { img: ico('rally'), label: 'Set rally point', tip: '<b>Set rally point</b><div>New units walk here after they are produced.</div>', act: () => { ui.mode = { type: 'rally', id: e.id }; } };
-      // Wehrmacht: the HQ card holds one place-building button per tier (reference board 08, item 6)
-      if (e.def.retreat && P.side === 'de') P.F.buildings.forEach((bid, i) => {
+      // middle row: the order new units start on (all buildings share it)
+      roles.forEach((r, i) => { const R = AI.ROLES[r]; out[4 + i] = { img: ico(R.icon), label: 'New units: ' + R.name, tip: `<b>New units: ${R.name}</b><div>${R.tip}</div><div class="note">Units trained from now on start on this order. Tap a unit to change its order later.</div>`, on: P.newRole === r, act: () => { P.newRole = r; flash('New units start on ' + R.name); } }; });
+      // bottom row, HQ only: the next base buildings; a free spot by the HQ is picked and the builders raise it
+      if (e.def.retreat) P.F.buildings.forEach((bid, i) => {
         const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
         if (why === 'Already built') return;
-        out[8 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div><div class="note">Placed here, raised by Pioneers.</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, null) };
+        out[8 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div><div class="note">Placed by the HQ for you; ${SIM.unitDef(P.F.builder).name}s raise it.</div>`, cost: def.cost, disabled: !!why, why, act: () => { const err = AI.build(G, 0, bid); flash(err || def.name + ' ordered'); } };
       });
       return out;
     }
-    if (ui.page === 'build' && e.type === 'squad' && e.def.builder) {
-      const defs = ['sandbags', 'wire', 'tanktrap'];
-      defs.forEach((d, i) => { const def = D.DEFENCES[d]; out[i] = { img: ico(d), label: def.name, tip: `<b>${def.name}</b><div>Free: ${def.time}s a section. Drag to lay a line.</div><div>${def.cover ? def.cover[0].toUpperCase() + def.cover.slice(1) + ' cover. ' : ''}${def.blocksInfantry ? 'Stops infantry; vehicles crush it. ' : ''}${def.blocksVehicles ? 'Stops vehicles; heavy tanks break it. ' : ''}</div>`, act: () => { ui.mode = { type: 'line', what: d, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; } }; });
-      if (P.side === 'us') P.F.buildings.forEach((bid, i) => {
-        const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
-        if (why === 'Already built') return;
-        out[4 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, e.id) };
-      });
-      out[11] = { img: ico('back'), label: 'Back', tip: '<b>Back</b><div>Return to orders.</div>', act: () => { ui.page = 'main'; } };
-      return out;
-    }
-    // orders row
-    out[0] = { img: ico('attackMove'), label: 'Attack move', tip: '<b>Attack move</b><div>Move, engaging enemies on the way.</div>', act: () => { ui.mode = { type: 'attackMove' }; } };
-    out[1] = { img: ico('stop'), label: 'Stop', tip: '<b>Stop</b>', act: () => issue(G, sel.map(s => s.id), { type: 'stop' }) };
-    if (e.type === 'vehicle') out[2] = { img: ico('reverse'), label: 'Reverse', tip: '<b>Reverse</b><div>Back away keeping the front armour on the enemy.</div>', act: () => { ui.mode = { type: 'reverse' }; } };
-    out[3] = { img: ico('retreat'), label: 'Retreat', tip: '<b>Retreat</b><div>Fall back to the headquarters. Retreating squads take less fire and recover from suppression.</div>', act: () => issue(G, sel.map(s => s.id), { type: 'retreat' }) };
-    if (e.type === 'squad' && e.garrison != null) out[2] = { img: ico('unload'), label: 'Exit building', tip: '<b>Exit building</b><div>Leave the house. Any move order also brings the squad out.</div>', act: () => issue(G, sel.filter(s => s.garrison != null).map(s => s.id), { type: 'unload' }) };
+    // units: top row is the standing order (applies to everything selected); the unit works it by itself
+    const ids = sel.filter(s => s.type !== 'building').map(s => s.id);
+    roles.forEach((r, i) => { const R = AI.ROLES[r]; out[i] = { img: ico(R.icon), label: R.name, tip: `<b>${R.name}</b><div>${R.tip}</div>`, on: sel.every(s => s.role === r), act: () => { issue(G, ids, { type: 'role', role: r }); flash((ids.length > 1 ? ids.length + ' units: ' : e.def.name + ': ') + R.name); } }; });
+    out[4] = { img: ico('retreat'), label: 'Retreat', tip: '<b>Retreat</b><div>Fall back to the headquarters. It cannot be called off. Units also retreat on their own when they are losing.</div>', act: () => issue(G, ids, { type: 'retreat' }) };
     if (e.type === 'squad') {
-      let a = 4;
-      for (const ab of e.def.abilities || []) {
-        const A = D.ABILITIES[ab], cd = Math.max(0, (e.cooldowns[ab] || 0) - G.t), why = cd > 0 ? 'Recharging' : !SIM.canAfford(P, A.cost) ? 'Not enough munitions' : ((ab === 'barrage' || ab === 'smokeBarrage') && !e.crew) ? 'No mortar' : null;
-        out[a++] = { img: ico(A.icon), label: A.name, tip: ab === 'breach' ? `<b>${A.name}</b><div>${costStr(A.cost)} &middot; click a building the enemy holds &middot; ${A.cooldown}s recharge</div><div>Grenades through the door throw the garrison out hurt and suppressed; your squad takes the building.</div>` : `<b>${A.name}</b><div>${costStr(A.cost)} &middot; range ${A.range} m &middot; ${A.cooldown}s recharge</div>`, cost: A.cost, cd, disabled: !!why, why, act: () => { ui.mode = { type: 'ability', id: ab, ids: sel.filter(s => (s.def.abilities || []).includes(ab)).map(s => s.id) }; } };
-      }
-      if (e.crew) out[6] = { img: ico('setup'), label: e.crew.state === 'packed' ? 'Set up facing' : 'Re-face', tip: '<b>Set up facing</b><div>Click a direction. The weapon only fires inside its arc.</div>', act: () => { ui.mode = { type: 'face', ids: sel.filter(s => s.crew).map(s => s.id) }; } };
       let u = 8;
       for (const up of e.def.upgrades || []) {
         const done = e.upgrades.has(up.id), busy = e.upgrading, why = done ? 'Fitted' : busy ? 'Upgrading' : !SIM.canAfford(P, up.cost) ? 'Not enough munitions' : !SIM.nearReinforcePoint(G, e) ? 'Must be near a base building' : null;
         out[u++] = { img: ico(up.swap && up.swap.sprite === 'flamethrower' ? 'flame' : 'lmg'), label: up.name, tip: `<b>${up.name}</b><div>${costStr(up.cost)} &middot; ${up.time}s</div>`, cost: up.cost, disabled: !!why, why, done, act: () => issue(G, [e.id], { type: 'upgrade', id: up.id }) };
       }
-      if (e.def.builder) {
-        out[10] = { img: ico('repair'), label: 'Repair', tip: '<b>Repair</b><div>Right-click a damaged vehicle or building of yours.</div>', act: () => { ui.mode = { type: 'repair', ids: sel.filter(s => s.def.builder).map(s => s.id) }; } };
-        out[11] = { img: ico('build'), label: 'Construct', tip: '<b>Construct</b><div>Field defences' + (P.side === 'us' ? ' and base buildings' : '') + '.</div>', act: () => { ui.page = 'build'; } };
-      }
     }
     return out;
   }
   function pressSlot(i) { const s = cardFor()[i]; if (!s || s.disabled) { if (s && s.why) flash(s.why); return; } s.act(); }
-  function startPlace(bid, builderId) {
-    let ids = builderId ? [builderId] : null;
-    if (!ids) { const bs = G.ents.filter(e => e.type === 'squad' && e.owner === 0 && !e.dead && e.def.builder); if (!bs.length) { flash('No Pioneers to build it'); return; } bs.sort((a, b) => (a.order.type === 'build') - (b.order.type === 'build')); ids = [bs[0].id]; }
-    ui.mode = { type: 'place', what: bid, ids };
-    if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap or drag to place it. Green fits, red shows why not.'); }
-  }
   function slotColAct(a) {
     const P = G.players[0];
     if (a === 'reinforce') { P.autoReinforce = !P.autoReinforce; flash('Automatic reinforcement ' + (P.autoReinforce ? 'on' : 'off')); }
@@ -235,7 +216,7 @@ const HUD = (() => {
       const n = e.type === 'squad' ? e.models.filter(m => m.alive).length : '';
       const st = e.type === 'squad' ? (e.retreating ? '<em class="ret"></em>' : e.suppState ? '<em class="sup">!</em>' : G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '') : (G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '');
       const hpf = e.type === 'vehicle' ? e.hp / e.maxHp : e.models.reduce((a, m) => a + (m.alive ? m.hp : 0), 0) / (e.def.hp * e.maxModels);
-      return `<div class="ru ${ui.selected.has(e.id) ? 'sel' : ''}" data-id="${e.id}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph)}">${n !== '' ? `<b>${n}</b>` : ''}${e.vet ? `<u>${'&#9733;'.repeat(e.vet)}</u>` : ''}${groupOf(e.id) ? `<span class="grp">${groupOf(e.id)}</span>` : ''}${st}<i style="width:${Math.round(hpf * 100)}%"></i></div>`;
+      return `<div class="ru ${ui.selected.has(e.id) ? 'sel' : ''}" data-id="${e.id}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph)}">${n !== '' ? `<b>${n}</b>` : ''}${e.vet ? `<u>${'&#9733;'.repeat(e.vet)}</u>` : ''}${groupOf(e.id) ? `<span class="grp">${groupOf(e.id)}</span>` : ''}${roleOf(e) ? `<span class="rl r-${e.role}">${AI.ROLES[e.role].name[0]}</span>` : ''}${st}<i style="width:${Math.round(hpf * 100)}%"></i></div>`;
     }).join('');
     if (html !== el.roster._u) { el.roster.querySelector('.r-units').innerHTML = html; el.roster._u = html; }
     const bs = G.ents.filter(e => e.owner === 0 && !e.dead && e.type === 'building');
@@ -271,9 +252,9 @@ const HUD = (() => {
     if (e.type === 'squad') { const al = e.models.filter(m => m.alive); strength = `<span class="str">&#128100; ${al.length}/${e.maxModels}</span>`; hpf = al.reduce((a, m) => a + m.hp, 0) / (al.length ? al.length * al[0].maxHp : 1); }
     else hpf = e.hp / e.maxHp;
     const cov = e.type === 'squad' ? COMBAT.squadCover(G, e) : null;
-    const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.garrison != null ? 'In a building' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.owner < 0 ? 'Abandoned: right-click with infantry to recrew' : e.crit ? [e.crit.engine === 2 ? 'Immobilised' : e.crit.engine === 1 ? 'Engine damaged' : '', e.crit.gun ? 'Main gun destroyed' : '', e.crit.shockT > G.t ? 'Crew shocked' : ''].filter(Boolean).join(' · ') || (e.order.type === 'reverse' ? 'Reversing' : '') : e.order.type === 'reverse' ? 'Reversing' : '');
+    const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.garrison != null ? 'In a building' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.owner < 0 ? 'Abandoned: infantry nearby will recrew it' : e.crit ? [e.crit.engine === 2 ? 'Immobilised' : e.crit.engine === 1 ? 'Engine damaged' : '', e.crit.gun ? 'Main gun destroyed' : '', e.crit.shockT > G.t ? 'Crew shocked' : ''].filter(Boolean).join(' · ') || (e.order.type === 'reverse' ? 'Reversing' : '') : e.order.type === 'reverse' ? 'Reversing' : '');
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
-    put(body, name + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
+    put(body, name + (own && roleOf(e) ? `<div class="ord r-${e.role}">Order: ${AI.ROLES[e.role].name}</div>` : '') + `<div class="role">${e.def.role}</div>${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
       `<div class="line">${strength}${(() => { const h = MAP.hAt(G.map, e.x, e.y); return h >= 1.5 ? `<span class="elev" title="Elevation: sees further; from 2.5 m above a target it fires over the target's cover">&#9650; ${h.toFixed(0)} m</span>` : ''; })()}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state">${state}</span>` : ''}</div>` +
       `<div class="weap">${weapons.join(' &middot; ')}</div>` +
@@ -290,7 +271,7 @@ const HUD = (() => {
     slots.forEach((s, i) => {
       const b = cardSlots[i];
       b.classList.toggle('empty', !s); b.classList.toggle('dis', !!(s && s.disabled)); b.classList.toggle('done', !!(s && s.done));
-      b.classList.toggle('armed', !!(s && ui.mode && ((ui.mode.type === 'attackMove' && i === 0) || (ui.mode.type === 'reverse' && i === 2))));
+      b.classList.toggle('armed', !!(s && s.on));
       const img = b.querySelector('img');
       if (!s) { img.removeAttribute('src'); b.querySelector('.cd').textContent = ''; put(b.querySelector('.cost'), ''); return; }
       if (img.getAttribute('src') !== s.img) img.src = s.img;
@@ -365,7 +346,7 @@ const HUD = (() => {
     else if (a === 'menu') MAIN.menu(true);
     ui.page = 'main';
   }
-  function togglePause() { ui.paused = !ui.paused; flash(ui.paused ? 'Tactical pause: give orders, Space to resume' : 'Resumed'); }
+  function togglePause() { ui.paused = !ui.paused; flash(ui.paused ? 'Paused: spend and set orders, Space to resume' : 'Resumed'); }
 
   /* ---------------- input ---------------- */
   const mouse = { x: -1, y: -1, down: false, drag: null, rdown: null, inCanvas: false, moved: false };
@@ -373,12 +354,6 @@ const HUD = (() => {
   function houseAtScreen(sx, sy) {
     for (const z of [0, 1.5, 3, 4.5, 6]) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .3); if (h && FOG.explored(G, 0, h.x, h.y)) return h; }
     return null;
-  }
-  /* an abandoned gun or dropped weapon under the cursor */
-  function dropAt(sx, sy) {
-    let best = null, bd = (ui.touch ? 40 : 26) ** 2;
-    for (const d of G.drops || []) { if (!FOG.explored(G, 0, d.x, d.y)) continue; const [x, y] = RENDER.toScreen(d.x, d.y, .5); const q = (x - sx) ** 2 + (y - sy) ** 2; if (q < bd) { bd = q; best = d; } }
-    return best;
   }
   function entAt(sx, sy) {
     let best = null, bd = ui.touch ? 46 * 46 : 30 * 30;
@@ -429,7 +404,6 @@ const HUD = (() => {
     el.mmc.addEventListener('mousedown', e => {
       const [wx, wy] = mmEventWorld(e);
       if (e.button === 0) { RENDER.cam.x = wx; RENDER.cam.y = wy; mouse.mmDrag = true; }
-      if (e.button === 2) { const ids = selEnts().filter(s => s.owner === 0).map(s => s.id); if (ids.length) issue(G, ids, { type: 'move', x: wx, y: wy }, e.shiftKey); }
     });
     el.mmc.addEventListener('mousemove', e => { if (mouse.mmDrag && e.buttons & 1) { const [wx, wy] = mmEventWorld(e); RENDER.cam.x = wx; RENDER.cam.y = wy; } });
   }
@@ -469,23 +443,6 @@ const HUD = (() => {
     if (k === 'F12' && e.shiftKey) ui.noFog = !ui.noFog;
   }
   function leftUp(e) {
-    const m = ui.mode, [wx, wy] = RENDER.toWorld(e.clientX, e.clientY);
-    if (m) {
-      const ids = m.ids || selEnts().filter(s => s.owner === 0).map(s => s.id);
-      if (m.type === 'attackMove' || m.type === 'reverse') { issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); marker(wx, wy, m.type === 'attackMove' ? '#ff6a5a' : '#ffd36a'); pinnedNote(ids); if (!e.shiftKey) ui.mode = null; return; }
-      if (m.type === 'ability') { const ent = G.byId.get(ids[0]), hb = m.id === 'breach' ? houseAtScreen(e.clientX, e.clientY) : null; if (ent) issue(G, [ent.id], { type: 'ability', id: m.id, x: hb ? hb.x : wx, y: hb ? hb.y : wy }); ui.mode = null; return; }
-      if (m.type === 'rally') { issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
-      if (m.type === 'place') {
-        const err = SIM.canPlace(G, 0, m.what, wx, wy) || SIM.buildReqMissing(G, 0, m.what) || (!SIM.canAfford(G.players[0], DATA.BUILDINGS[m.what].cost) ? 'Not enough resources' : null);
-        if (err) { flash(err); return; }
-        const builders = m.ids.filter(id => { const b = G.byId.get(id); return b && !b.dead; });
-        if (!builders.length) { flash('No engineers left to build it'); ui.mode = null; return; }
-        issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + ' placed'); return;
-      }
-      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
-      if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
-      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }); ui.mode = null; return; }
-    }
     // box or click select
     const d = mouse.drag;
     if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) {
@@ -505,72 +462,13 @@ const HUD = (() => {
       ui.lastClick = now; ui.lastId = t.id; ui.page = 'main';
     } else if (!e.shiftKey) ui.selected.clear();
   }
-  function rightUp(e) {
-    if (ui.mode) { ui.mode = null; ui.ghost = null; return; }
-    const sel = selEnts().filter(s => s.owner === 0); if (!sel.length) return;
-    const [wx, wy] = RENDER.toWorld(e.clientX, e.clientY), r = mouse.rdown, dragged = r && Math.hypot(e.clientX - r.x, e.clientY - r.y) > 12;
-    if (sel[0].type === 'building') { issue(G, sel.map(s => s.id), { type: 'rally', x: wx, y: wy }); return; }
-    const units = sel.filter(s => s.type !== 'building').map(s => s.id);
-    const t = !dragged && entAt(e.clientX, e.clientY);
-    // an abandoned vehicle: the nearest infantry squad climbs in; anything else fires on it
-    if (t && t.owner < 0 && t.type === 'vehicle') {
-      const inf = sel.filter(s => SIM.canPickUp(s) && s.models.filter(m => m.alive).length >= 2).sort((a, b) => U.dist2(a.x, a.y, t.x, t.y) - U.dist2(b.x, b.y, t.x, t.y));
-      if (inf.length) { issue(G, [inf[0].id], { type: 'recrew', target: t.id }); marker(t.x, t.y, '#ffe27a'); return; }
-      issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return;
-    }
-    if (t && t.owner === 1) { issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return; }
-    if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
-      const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
-      if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } else issue(G, builders, { type: 'repair', target: t.id }); return; }
-    }
-    // right-click an abandoned gun or a dropped weapon: the nearest squad that can use it goes for it
-    const dd = !dragged && !t ? dropAt(e.clientX, e.clientY) : null;
-    if (dd) {
-      const can = sel.filter(s => SIM.canPickUp(s)).sort((a, b) => U.dist2(a.x, a.y, dd.x, dd.y) - U.dist2(b.x, b.y, dd.x, dd.y));
-      if (can.length) { issue(G, [can[0].id], { type: 'pickup', drop: dd.id }); marker(dd.x, dd.y, '#ffe27a'); return; }
-    }
-    // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
-    const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
-    if (hh && (hh.occ == null || (G.byId.get(hh.occ) || {}).owner === 0)) {
-      const inf = sel.filter(s => s.type === 'squad' && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
-      if (inf.length) {
-        if (hh.occ == null || hh.occ === inf[0].id) issue(G, [inf[0].id], { type: 'garrison', house: hh.id }); else flash('That building is already occupied');
-        const rest = units.filter(id => id !== inf[0].id); if (rest.length) issue(G, rest, { type: 'move', x: hh.x + (hh.x < 100 ? 6 : -6), y: hh.y });
-        marker(hh.x, hh.y, '#7fe0ff'); return;
-      }
-    }
-    if (dragged) {
-      // right-drag: move there and face the drag direction (team weapons set up that way)
-      const [sx, sy] = RENDER.toWorld(r.x, r.y), face = Math.atan2(wy - sy, wx - sx);
-      issue(G, units, { type: 'move', x: sx, y: sy, face }, e.shiftKey); marker(sx, sy, '#7fe0ff'); pinnedNote(units); return;
-    }
-    issue(G, units, { type: 'move', x: wx, y: wy }, e.shiftKey); marker(wx, wy, e.shiftKey ? '#b8f0ff' : '#7fe0ff'); pinnedNote(units);
-  }
-  function marker(x, y, col) { G.fx.push({ kind: 'order', x, y, t: G.t, life: .8, col }); }
-  /* pinned squads only take a retreat order: say so instead of silently ignoring the click */
-  function pinnedNote(ids) {
-    const sq = ids.map(id => G.byId.get(id)).filter(x => x && x.type === 'squad');
-    if (sq.length && sq.some(x => SIM.isPinned(x))) flash(sq.every(x => SIM.isPinned(x)) ? 'Pinned down: only a retreat order works' : 'Some squads are pinned down and stay put');
-  }
-
-  /* ---------------- touch: tap to select or order, drag to pan, pinch to zoom, long-press to attack-move ---------------- */
+  /* right click only backs out of a pending pick: units are never ordered about by hand */
+  function rightUp(e) { if (ui.mode) { ui.mode = null; ui.ghost = null; } }
+  /* ---------------- touch: tap to select, drag to pan, pinch to zoom ---------------- */
   const touch = { pts: new Map(), start: null, moved: false, pinch: null, lastTap: 0 };
   function fake(x, y, shift) { return { clientX: x, clientY: y, shiftKey: !!shift, target: canvasEl }; }
-  function tapAt(x, y) {
-    const m = ui.mode;
-    if (m) {
-      if (m.type === 'line' && !m.start) { const [wx, wy] = RENDER.toWorld(x, y); m.start = { x: wx, y: wy }; flash('Tap where the line ends'); return; }
-      mouse.drag = null; leftUp(fake(x, y)); return;
-    }
-    const t = entAt(x, y), mine = selEnts().filter(s => s.owner === 0);
-    if (t && t.owner === 0 && !(mine.length && mine.some(s => s.def && s.def.builder) && t.type !== 'squad' && (t.hp < t.maxHp || t.built < 1) && !ui.multi)) { mouse.drag = null; leftUp(fake(x, y, ui.multi)); return; }
-    if (mine.length && mine[0].type !== 'building' || mine.length && mine[0].type === 'building' && !t) { rightUp(fake(x, y)); return; }
-    mouse.drag = null; leftUp(fake(x, y));
-  }
-  function longPressAt(x, y) {
-    const ids = selEnts().filter(s => s.owner === 0 && s.type !== 'building').map(s => s.id); if (!ids.length) return;
-    const [wx, wy] = RENDER.toWorld(x, y); issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move'); pinnedNote(ids);
-  }
+  /* a tap selects (your unit or building, or an enemy to look at); a tap on open ground clears the selection */
+  function tapAt(x, y) { mouse.drag = null; leftUp(fake(x, y, ui.multi && !!entAt(x, y))); }
   function bindTouch() {
     bindTouchHud();
     if (pageBound) return;
@@ -583,7 +481,7 @@ const HUD = (() => {
       if (ui.mode) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = true; }
       if (touch.pts.size === 1) {
         touch.start = { x: e.clientX, y: e.clientY, t: performance.now(), cx: RENDER.cam.x, cy: RENDER.cam.y }; touch.moved = false;
-        clearTimeout(touch.lp); touch.lp = setTimeout(() => { if (!touch.moved && touch.pts.size === 1) { touch.longed = true; longPressAt(touch.start.x, touch.start.y); } }, 550); touch.longed = false;
+        clearTimeout(touch.lp); touch.longed = false;
         if (ui.boxMode) { mouse.down = true; mouse.drag = { x: e.clientX, y: e.clientY, shift: ui.multi }; mouse.x = e.clientX; mouse.y = e.clientY; }
       } else if (touch.pts.size === 2) {
         clearTimeout(touch.lp); mouse.down = false; mouse.drag = null;
@@ -660,33 +558,10 @@ const HUD = (() => {
     RENDER.clampCam(G);
     const t = mouse.inCanvas ? entAt(mouse.x, mouse.y) : null; ui.hover = t ? t.id : null;
     const p = mouse.inCanvas ? pointAt(mouse.x, mouse.y) : null; ui.hoverPoint = p ? p.id : null;
-    const [wx, wy] = RENDER.toWorld(mouse.x, mouse.y), m = ui.mode;
-    ui.ghost = null;
-    if (m) {
-      if (m.type === 'place') ui.ghost = { kind: 'building', id: m.what, x: wx, y: wy, err: SIM.canPlace(G, 0, m.what, wx, wy) };
-      else if (m.type === 'line') ui.ghost = m.start ? { kind: 'line', x: m.start.x, y: m.start.y, x2: wx, y2: wy } : { kind: 'target', x: wx, y: wy, r: 1.5 };
-      else if (m.type === 'ability' && m.id === 'breach') { const hb = mouse.inCanvas ? houseAtScreen(mouse.x, mouse.y) : null, o = hb && hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = hb ? { kind: 'house', h: hb, ok: !!(o && o.owner === 1), label: o && o.owner === 1 ? 'Breach' : 'No enemy inside' } : { kind: 'target', x: wx, y: wy, r: 1.5, err: 'Pick a building the enemy holds' }; }
-      else if (m.type === 'ability') { const A = D.ABILITIES[m.id], e = G.byId.get(m.ids[0]); const d = e ? Math.hypot(wx - e.x, wy - e.y) : 0; ui.ghost = { kind: 'target', x: wx, y: wy, r: A.smoke ? A.smoke.radius : m.id === 'barrage' ? 6 : 4, err: A.minRange && d < A.minRange ? 'Too close' : null }; }
-      else if (m.type === 'face') { const e = G.byId.get(m.ids[0]); if (e) ui.ghost = { kind: 'face', x: e.x, y: e.y, a: Math.atan2(wy - e.y, wx - e.x) }; }
-    }
-    if (mouse.rdown && Math.hypot(mouse.x - mouse.rdown.x, mouse.y - mouse.rdown.y) > 12) { const [sx, sy] = RENDER.toWorld(mouse.rdown.x, mouse.rdown.y); ui.ghost = { kind: 'face', x: sx, y: sy, a: Math.atan2(wy - sy, wx - sx) }; }
-    const hd = mouse.inCanvas && !m && !t ? dropAt(mouse.x, mouse.y) : null; ui.hoverDrop = hd ? hd.id : null;
-    if (hd && selEnts().some(s => s.owner === 0 && SIM.canPickUp(s))) ui.ghost = { kind: 'label', x: hd.x, y: hd.y, z: 3, label: hd.kind === 'team' ? (hd.side !== G.players[0].side ? 'Capture ' : 'Recrew ') + D.SQUADS[hd.defId].name.replace(' Team', '') : 'Pick up ' + D.W[hd.weapon].name };
-    else if (!m && !t && mouse.inCanvas && selEnts().some(s => s.owner === 0 && s.type === 'squad')) {
-      const hb = houseAtScreen(mouse.x, mouse.y);
-      if (hb) { const o = hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = { kind: 'house', h: hb, ok: !o || o.owner === 0, label: !o ? 'Garrison' : o.owner === 0 ? 'Occupied' : 'Enemy inside' }; }
-    }
-    // cover preview dots where the selection would stand (white none, yellow light, green heavy, red negative)
-    ui.coverPreview = null;
-    const sel = selEnts().filter(s => s.owner === 0 && s.type === 'squad');
-    if (sel.length === 1 && mouse.inCanvas && !m && !t && !(ui.ghost && (ui.ghost.kind === 'house' || ui.ghost.kind === 'label'))) {
-      const s = sel[0];
-      let face = SIM.threatDir(G, s, wx, wy); if (face == null) face = Math.atan2(wy - s.y, wx - s.x);
-      const out = SIM.standPlan(G, s, wx, wy, face).map(p2 => ({ x: p2.x, y: p2.y, cover: p2.cover === 'garrison' ? 'heavy' : p2.cover }));
-      ui.coverPreview = out;
-    }
+    const m = ui.mode; ui.ghost = null;
+    ui.hoverDrop = null; ui.coverPreview = null;
     // cursor
-    canvasEl.style.cursor = m ? 'crosshair' : t && t.owner === 1 ? 'crosshair' : 'default';
+    canvasEl.style.cursor = m ? 'crosshair' : 'default';
   }
 
   /* selection rectangle: a DOM box over the canvas */
