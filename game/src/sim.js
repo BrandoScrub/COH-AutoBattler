@@ -911,11 +911,17 @@ const SIM = (() => {
       const stack = [start], seen = new Set([start.id]);
       while (stack.length) { const S = stack.pop(); S.supplied = true; for (const n of S.neigh) { const N = m.sectors[n]; if (!seen.has(n) && N.owner === P.slot) { seen.add(n); stack.push(N); } } }
     }
+    for (const p of m.points) {
+      const paying = p.owner >= 0 && m.sectors[p.sector].supplied;
+      if (p.paying && !paying && p.owner === p.payOwner) event(G, p.owner, 'lost', 'Point cut off: no income', p.x, p.y);
+      p.paying = paying; p.payOwner = p.owner;
+    }
   }
-  // CoH3: an enemy point can be neutralised anywhere; only taking a neutral point needs a sector next to your supplied territory
-  function canCapture(G, slot, p) {
-    if (p.owner >= 0 && p.owner !== slot) return true;
+  /* would this point be joined to slot's supplied territory if slot held it? only joined points pay income.
+     Any point can be captured; a cut-off one still counts as a victory point but pays no resources. */
+  function connected(G, slot, p) {
     const S = G.map.sectors[p.sector];
+    if (p.owner === slot) return S.supplied;
     for (const n of S.neigh) { const N = G.map.sectors[n]; if (N.owner === slot && N.supplied) return true; }
     return false;
   }
@@ -935,8 +941,6 @@ const SIM = (() => {
       const side = rate[0] ? 0 : rate[1] ? 1 : -1;
       if (side < 0) { if (p.owner < 0 && p.cap > 0) p.cap = Math.max(0, p.cap - dt / D.ECON.captureTime * .5); continue; }
       if (p.owner === side) { p.cap = 1; continue; }
-      if (!canCapture(G, side, p)) { p.blocked = side; continue; }
-      p.blocked = -1;
       const step = rate[side] * dt / D.ECON.captureTime;
       if (p.owner >= 0) {             // decapture first
         p.cap -= step;
@@ -944,7 +948,7 @@ const SIM = (() => {
       } else {
         if (p.capSide !== side) { p.capSide = side; p.cap = Math.max(0, p.cap - step); if (p.cap > 0) continue; }
         p.cap += step;
-        if (p.cap >= 1) { p.cap = 1; p.owner = side; updateTerritory(G); event(G, side, 'captured', (p.type === 'victory' ? 'Victory point' : 'Point') + ' captured', p.x, p.y); }
+        if (p.cap >= 1) { p.cap = 1; p.owner = side; updateTerritory(G); event(G, side, 'captured', (p.type === 'victory' ? 'Victory point' : 'Point') + ' captured' + (G.map.sectors[p.sector].supplied ? '' : ': cut off, no income'), p.x, p.y); }
       }
     }
   }
@@ -1063,6 +1067,6 @@ const SIM = (() => {
   }
 
   return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
-    vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, canCapture, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
+    vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, connected, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
