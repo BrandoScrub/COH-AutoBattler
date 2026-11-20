@@ -9,20 +9,11 @@ const RENDER = (() => {
   const R = { opt: { shadows: true, corpses: true }, cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
 
   /* ---------------- camera ---------------- */
-  /* world (x, y) and a height z above the ground there -> screen. The terrain height is added, so everything placed on
-     the ground sits on the hills; toScreenFlat ignores terrain (for the ground and fog transforms). */
-  // drawn height is exaggerated so a 5 m rise reads at a glance from the camera's height; the rules use true heights
-  const EXAG = 1.7;
-  const hGround = (x, y) => R.G && R.G.map && R.G.map.hgt ? MAP.hAt(R.G.map, x, y) * EXAG : 0;
-  function toScreenFlat(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
-  function toScreen(x, y, z) { return toScreenFlat(x, y, (z || 0) + hGround(x, y)); }
-  function toWorldFlat(sx, sy) { const c = R.cam, k = c.k; const a = (sx - R.W / 2) / (PXM * k) + (c.x - c.y), b = (sy - R.H / 2) / (PXM * .5 * k) + (c.x + c.y); return [(a + b) / 2, (b - a) / 2]; }
-  /* screen -> the ground point drawn there (a few fixed-point steps over the terrain) */
-  function toWorld(sx, sy) {
-    let p = toWorldFlat(sx, sy);
-    for (let i = 0; i < 4; i++) p = toWorldFlat(sx, sy + hGround(p[0], p[1]) * VZ * R.cam.k);
-    return p;
-  }
+  /* world (x, y, z above the ground) -> screen, and back. The ground is drawn flat: height is painted into the ground
+     texture as relief shading (see shadeGround) rather than lifted, which keeps the flat painted look of the game. The
+     height rules (sight, cover, speed) use the true terrain all the same. */
+  function toScreen(x, y, z) { const c = R.cam, k = c.k; return [((x - y) - (c.x - c.y)) * PXM * k + R.W / 2, ((x + y) - (c.x + c.y)) * PXM * .5 * k + R.H / 2 - (z || 0) * VZ * k]; }
+  function toWorld(sx, sy) { const c = R.cam, k = c.k; const a = (sx - R.W / 2) / (PXM * k) + (c.x - c.y), b = (sy - R.H / 2) / (PXM * .5 * k) + (c.x + c.y); return [(a + b) / 2, (b - a) / 2]; }
   function clampCam(G) { const c = R.cam; c.x = U.clamp(c.x, 5, G.map.w - 5); c.y = U.clamp(c.y, 5, G.map.h - 5); c.k = U.clamp(c.k, ZOOM_MIN, 1.6); }
 
   /* ---------------- one-off art: ground texture, trees, props, icons ---------------- */
@@ -47,28 +38,21 @@ const RENDER = (() => {
       const im = new Image(); im.onload = () => { R.tiles[n] = im; res(); }; im.onerror = () => res(); im.src = base + n + '.jpg';
     })));
   }
-  /* Hill shading baked over the ground texture: slopes away from the light (upper left) darken, slopes toward it and
-     the tops warm up, and contour lines mark every metre (stronger every 3 m), so the shape of the ground reads at a
-     glance. Drawn as one transparent layer over the painted ground. */
+  /* Relief shading baked over the ground texture, in the manner of a painted map: slopes turned from the light (upper
+     left) take a soft shadow, slopes toward it and the tops a little warm light. Gentle on purpose so it sits with the
+     painted ground; the H view shows exact heights. */
   function shadeGround(G, ground, S) {
     const m = G.map; if (!m.hgt) return;
-    const P = 3, W = m.w * P, H = m.h * P, sc = canvas(W, H), sg = sc.getContext('2d'), img = sg.createImageData(W, H), d = img.data;
+    const P = 2, W = m.w * P, H = m.h * P, sc = canvas(W, H), sg = sc.getContext('2d'), img = sg.createImageData(W, H), d = img.data;
     const L = [-.6, -.45, .66], Ln = Math.hypot(...L), lx = L[0] / Ln, ly = L[1] / Ln, lz = L[2] / Ln, flat = lz;
-    const band = (x, y, step) => Math.floor(MAP.hAt(m, x, y) / step);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const wx = (x + .5) / P, wy = (y + .5) / P, h = MAP.hAt(m, wx, wy);
-      const dx = (MAP.hAt(m, wx + .5, wy) - MAP.hAt(m, wx - .5, wy)) * 2.2, dy = (MAP.hAt(m, wx, wy + .5) - MAP.hAt(m, wx, wy - .5)) * 2.2;
+      const dx = (MAP.hAt(m, wx + .7, wy) - MAP.hAt(m, wx - .7, wy)) / 1.4 * 1.6, dy = (MAP.hAt(m, wx, wy + .7) - MAP.hAt(m, wx, wy - .7)) / 1.4 * 1.6;
       const n = Math.hypot(dx, dy, 1), lum = (-dx * lx - dy * ly + lz) / n / flat;
       let r, g, bl, a;
-      if (lum < 1) { r = 22; g = 16; bl = 8; a = Math.min(.5, (1 - lum) * 1.25); }
-      else { r = 255; g = 238; bl = 196; a = Math.min(.24, (lum - 1) * 1.1); }
-      // the higher, the warmer and lighter
-      if (h > .8) { const ta = Math.min(.18, (h - .8) * .035); r = r * (1 - ta) + 255 * ta; g = g * (1 - ta) + 236 * ta; bl = bl * (1 - ta) + 180 * ta; a = a + ta * (1 - a); }
-      // contours: every metre, every third stronger
-      if (h > .4) {
-        const e1 = band(wx + .34, wy, 1) !== band(wx, wy, 1) || band(wx, wy + .34, 1) !== band(wx, wy, 1);
-        if (e1) { const major = band(wx + .34, wy, 3) !== band(wx, wy, 3) || band(wx, wy + .34, 3) !== band(wx, wy, 3), ca = major ? .42 : .22; r = r * (1 - ca) + 40 * ca; g = g * (1 - ca) + 30 * ca; bl = bl * (1 - ca) + 18 * ca; a = a + ca * (1 - a); }
-      }
+      if (lum < 1) { r = 40; g = 30; bl = 18; a = Math.min(.3, (1 - lum) * .8); }
+      else { r = 255; g = 240; bl = 205; a = Math.min(.12, (lum - 1) * .6); }
+      if (h > 1.5) { const ta = Math.min(.07, (h - 1.5) * .015); r = r * (1 - ta) + 250 * ta; g = g * (1 - ta) + 232 * ta; bl = bl * (1 - ta) + 185 * ta; a = a + ta * (1 - a); }
       const i = (y * W + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = bl; d[i + 3] = a * 255;
     }
     sg.putImageData(img, 0, 0);
@@ -316,8 +300,8 @@ const RENDER = (() => {
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
     // ground: tilted tiles that follow the terrain, back to front (texture px at R.groundS px a metre)
-    drawTerrain(G, c, k, R.ground, R.groundS || 8);
-    if (ui.heightView) { if (R.heightKey !== G.map.seed + ':' + G.map.w) buildHeightView(G); drawTerrain(G, c, k, R.heightC, 4, true); }
+    drawFlat(c, k, R.ground, R.groundS || 8);
+    if (ui.heightView) { if (R.heightKey !== G.map.seed + ':' + G.map.w) buildHeightView(G); drawFlat(c, k, R.heightC, 4); }
     const vis = (x, y, pad) => { const [sx, sy] = toScreen(x, y); return sx > -pad && sx < R.W + pad && sy > -pad && sy < R.H + pad * 1.5; };
     // craters
     c.fillStyle = 'rgba(58,46,30,.55)';
@@ -353,48 +337,18 @@ const RENDER = (() => {
     drawSmoke(G, c, k);
     // fog
     if (!ui.noFog) {
-      drawTerrain(G, c, k, R.fogC, 1 / FOG.C, true);   // translucent: tiles must meet, not overlap
+      drawFlat(c, k, R.fogC, 1 / FOG.C);
     }
     drawOverlay(G, c, k, ui);
     if (c.endFrame) c.endFrame();
   }
 
-  /* The terrain as tiles: each tile is drawn as the plane that best fits its ground, slightly enlarged so neighbours
-     overlap and no seam shows (translucent layers like fog are drawn seamless instead). The tile list is built once per
-     map: 16 m tiles where the ground is close to a plane, split down to 4 m where it bends (a looser fit when zoomed
-     out). Drawn back to front, only those on screen. img holds S px a metre. */
-  function terrainTiles(G, tol, minT) {
-    const m = G.map, out = [];
-    const fit = (x0, y0, T) => {
-      const h00 = MAP.hAt(m, x0, y0), h10 = MAP.hAt(m, x0 + T, y0), h01 = MAP.hAt(m, x0, y0 + T), h11 = MAP.hAt(m, x0 + T, y0 + T);
-      const gx = (h10 - h00 + h11 - h01) / (2 * T), gy = (h01 - h00 + h11 - h10) / (2 * T), hc = (h00 + h10 + h01 + h11) / 4;
-      let err = 0;
-      for (let j = 0; j <= 4; j++) for (let i = 0; i <= 4; i++) { const x = x0 + T * i / 4, y = y0 + T * j / 4; err = Math.max(err, Math.abs(MAP.hAt(m, x, y) - (hc + gx * (x - x0 - T / 2) + gy * (y - y0 - T / 2)))); }
-      return { x0, y0, T, gx, gy, hc, err };
-    };
-    const split = (x0, y0, T) => { const t = fit(x0, y0, T); if (t.err <= tol || T <= minT) out.push(t); else { const h = T / 2; split(x0, y0, h); split(x0 + h, y0, h); split(x0, y0 + h, h); split(x0 + h, y0 + h, h); } };
-    for (let y = 0; y < m.h; y += 16) for (let x = 0; x < m.w; x += 16) split(x, y, 16);
-    out.sort((p, q) => (p.x0 + p.y0 + p.T) - (q.x0 + q.y0 + q.T));
-    return out;
-  }
-  function drawTerrain(G, c, k, img, S, seamless) {
-    const m = G.map, key = m.seed + ':' + m.w;
-    if (R.tileKey !== key) { R.tileKey = key; R.tilesFine = terrainTiles(G, .04, 4); R.tilesCoarse = terrainTiles(G, .12, 8); }
-    // the 2D fallback rasterises on the CPU: fewer, larger tiles there
-    const list = k >= .6 && R.ctx && R.ctx.endFrame ? R.tilesFine : R.tilesCoarse, ax = PXM * k / S, bx = -PXM * k / S, mar = 16 * PXM * k;
-    let n = 0;
-    for (const t of list) {
-      const wcx = t.x0 + t.T / 2, wcy = t.y0 + t.T / 2, [sx, sy] = toScreenFlat(wcx, wcy, t.hc * EXAG);
-      if (sx < -mar || sx > R.W + mar || sy < -mar || sy > R.H + mar) continue;
-      // texture px u -> world x = u / S; screen = tile centre + d(screen)/d(world) * (world - centre)
-      const ay = (PXM * .5 * k - VZ * k * t.gx * EXAG) / S, by = (PXM * .5 * k - VZ * k * t.gy * EXAG) / S;
-      c.setTransform(ax, ay, bx, by, sx - (ax * wcx * S + bx * wcy * S), sy - (ay * wcx * S + by * wcy * S));
-      const pad = seamless ? 0 : .7, u0 = (t.x0 - pad) * S, v0 = (t.y0 - pad) * S, uw = (t.T + 2 * pad) * S;
-      const su = Math.max(0, u0), sv = Math.max(0, v0), sw = Math.min(img.width, u0 + uw) - su, sh = Math.min(img.height, v0 + uw) - sv;
-      if (sw > 0 && sh > 0) { c.drawImage(img, su, sv, sw, sh, su, sv, sw, sh); n++; }
-    }
+  /* a ground-plane image (S px a metre) with the iso transform, in one draw */
+  function drawFlat(c, k, img, S) {
+    const [ox, oy] = toScreen(0, 0);
+    c.setTransform(PXM * k / S, PXM * .5 * k / S, -PXM * k / S, PXM * .5 * k / S, ox, oy);
+    c.drawImage(img, 0, 0);
     c.setTransform(1, 0, 0, 1, 0, 0);
-    R.terrainDrawn = n;
   }
 
   /* ---------------- ground markers ---------------- */
@@ -911,5 +865,5 @@ const RENDER = (() => {
   }
   const isGL = () => !!(R.ctx && R.ctx.endFrame);
 
-  return Object.assign(R, { EXAG, toScreenFlat, toWorldFlat, hGround, loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  return Object.assign(R, { loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();
