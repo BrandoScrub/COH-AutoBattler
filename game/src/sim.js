@@ -8,13 +8,14 @@ const SIM = (() => {
   function create(opts) {
     const map = MAP.create(opts.seed || 7);
     const G = {
-      t: 0, map, ents: [], byId: new Map(), nextId: 1, projectiles: [], fx: [], events: [], over: null,
+      t: 0, mode: opts.mode || 'skirmish', spectate: opts.mode === 'spectate', map, ents: [], byId: new Map(), nextId: 1, projectiles: [], fx: [], events: [], over: null,
       players: [], layout: opts.crewLayout || null, rng: U.rng((opts.seed || 7) * 31 + 5),
     };
     const sides = [opts.playerSide || 'us', opts.playerSide === 'de' ? 'us' : 'de'];
     sides.forEach((side, slot) => {
       const F = D.FACTIONS[side];
-      G.players.push({ slot, side, F, name: slot === 0 ? 'You' : 'Enemy', ai: slot === 1, res: { ...D.ECON.start }, income: { mp: 0, mu: 0, fu: 0 },
+      const res = opts.mode === 'sandbox' && slot === 0 ? { ...D.ECON.sandboxStart } : { ...D.ECON.start };
+      G.players.push({ slot, side, F, name: opts.mode === 'spectate' ? F.name : slot === 0 ? 'You' : 'Enemy', ai: slot === 1 || opts.mode === 'spectate', res, income: { mp: 0, mu: 0, fu: 0 },
         pop: 0, popCap: D.ECON.popCap, vp: D.ECON.vpStart, vpHeld: 0, autoReinforce: true, upkeep: 0, groups: {}, built: new Set(), vis: null, alerts: [] });
       const b = map.bases[slot];
       const hq = placeBuilding(G, F.hq, slot, b.hq.x, b.hq.y, 1);

@@ -217,7 +217,7 @@ const DATA = (() => {
 
   /* Match economy (per minute). Starting stock and base income as seen on the reference boards (fuel +6 base). */
   const ECON = {
-    start: { mp: 390, mu: 25, fu: 15 }, baseIncome: { mp: 275, mu: 0, fu: 6 }, popCap: 100,
+    start: { mp: 390, mu: 25, fu: 15 }, sandboxStart: { mp: 10000, mu: 10000, fu: 10000 } /* standIn: test mode purse */, baseIncome: { mp: 275, mu: 0, fu: 6 }, popCap: 100,
     point: { standard: { mu: 4, fu: 2 }, munitions: { mu: 10, fu: 0 }, fuel: { mu: 0, fu: 8 }, victory: { mu: 3, fu: 1 } },
     captureTime: 20, vpStart: 500, vpDrainPerDiff: .2,
   };
